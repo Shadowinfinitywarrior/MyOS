@@ -43,7 +43,7 @@ $(BUILD)/%.o: lib/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # ---- User-space programs (built separately, embedded into the kernel) ----
-USER_PROGS = hello forkdemo
+USER_PROGS = hello forkdemo stacktrip
 
 $(BUILD)/user/crt0.o: user/crt0.asm | $(BUILD)
 	@mkdir -p $(dir $@)
@@ -60,6 +60,9 @@ $(BUILD)/user_hello_embed.o: $(BUILD)/user/hello.elf
 	$(LD) -r -b binary $< -o $@
 
 $(BUILD)/user_forkdemo_embed.o: $(BUILD)/user/forkdemo.elf
+	$(LD) -r -b binary $< -o $@
+
+$(BUILD)/user_stacktrip_embed.o: $(BUILD)/user/stacktrip.elf
 	$(LD) -r -b binary $< -o $@
 
 $(BUILD)/smp_trampoline_stub.o: kernel/smp_trampoline_stub.c | $(BUILD)
@@ -88,7 +91,7 @@ SETTINGS_OBJS = $(SETTINGS_SRCS:user/%.c=$(BUILD)/%.o)
 BROWSER_OBJS = $(BROWSER_SRCS:user/%.c=$(BUILD)/%.o)
 ALL_OBJS = $(KERNEL_OBJS) $(DRIVER_OBJS) $(FS_OBJS) $(NET_OBJS) $(LIB_OBJS) $(TERMINAL_OBJS) $(FILE_EXPLORER_OBJS) $(SETTINGS_OBJS) $(BROWSER_OBJS) $(BUILD)/smp_trampoline_stub.o $(BUILD)/context_switch.o $(BUILD)/isr_stubs.o
 
-$(BUILD)/kernel.elf: $(BUILD)/kernel_entry.o $(ALL_OBJS) $(BUILD)/user_hello_embed.o $(BUILD)/user_forkdemo_embed.o
+$(BUILD)/kernel.elf: $(BUILD)/kernel_entry.o $(ALL_OBJS) $(BUILD)/user_hello_embed.o $(BUILD)/user_forkdemo_embed.o $(BUILD)/user_stacktrip_embed.o
 	$(LD) $(LDFLAGS) -o $@ $^
 
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf

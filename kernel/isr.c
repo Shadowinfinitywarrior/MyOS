@@ -31,6 +31,30 @@ void isr_handler(registers_t *regs) {
         serial_printf("RIP=0x%lx RSP=0x%lx CS=0x%lx err=0x%lx\n",
                       (unsigned long)regs->rip, (unsigned long)regs->rsp,
                       (unsigned long)regs->cs, (unsigned long)regs->err_code);
+if (vector == 13) {
+            serial_printf("[GP] rsi=0x%lx rcx=0x%lx rax=0x%lx\n",
+                          (unsigned long)regs->rsi, (unsigned long)regs->rcx,
+                          (unsigned long)regs->rax);
+            uint64_t cr3v;
+            __asm__ __volatile__("mov %%cr3, %0" : "=r"(cr3v));
+            uint64_t wva[2] = { regs->rsi, regs->rax };
+            for (int w = 0; w < 2; w++) {
+                uint64_t va = wva[w];
+                uint64_t *pm = (uint64_t *)(uintptr_t)(cr3v & ~0xFFFULL);
+                uint64_t i4 = (va >> 39) & 0x1FF, i3 = (va >> 30) & 0x1FF,
+                         i2 = (va >> 21) & 0x1FF, i1 = (va >> 12) & 0x1FF;
+                uint64_t l3 = pm[i4], l2 = (l3 & 1) ?
+                    ((uint64_t *)(uintptr_t)(l3 & ~0xFFFULL))[i3] : 0;
+                uint64_t l1 = (l2 & 1) ?
+                    ((uint64_t *)(uintptr_t)(l2 & ~0xFFFULL))[i2] : 0;
+                uint64_t l0 = ((l1 & 1) && !(l1 & 0x80)) ?
+                    ((uint64_t *)(uintptr_t)(l1 & ~0xFFFULL))[i1] : 0xDEADDEADull;
+                serial_printf("  walk[%d] va=0x%lx pml4=0x%lx pdpt=0x%lx pd=0x%lx pte=0x%lx\n",
+                              w, (unsigned long)va,
+                              (unsigned long)l3, (unsigned long)l2,
+                              (unsigned long)l1, (unsigned long)l0);
+            }
+        }
         if (vector == 14) {
             uint64_t cr2;
             __asm__ __volatile__("mov %%cr2, %0" : "=r"(cr2));

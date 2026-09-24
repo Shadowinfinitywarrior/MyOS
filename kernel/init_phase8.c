@@ -29,6 +29,8 @@ extern const uint8_t _binary_build_user_hello_elf_start[];
 extern const uint8_t _binary_build_user_hello_elf_end[];
 extern const uint8_t _binary_build_user_forkdemo_elf_start[];
 extern const uint8_t _binary_build_user_forkdemo_elf_end[];
+extern const uint8_t _binary_build_user_stacktrip_elf_start[];
+extern const uint8_t _binary_build_user_stacktrip_elf_end[];
 
 #define CMD_MAX_LEN 128
 
@@ -133,11 +135,16 @@ void init_phase8(void) {
                         (uint64_t)(_binary_build_user_hello_elf_end -
                                    _binary_build_user_hello_elf_start));
 
-    kprintf("[PHASE8] Spawning user-space 'forkdemo' process\n");
+    kprintf("[PHASE8] Spawning user 'forkdemo' process\n");
     process_create_user("forkdemo",
                         _binary_build_user_forkdemo_elf_start,
                         (uint64_t)(_binary_build_user_forkdemo_elf_end -
                                    _binary_build_user_forkdemo_elf_start));
+
+    /* stacktrip (user/stacktrip.c) is a Phase 2.4 QA artifact: its guard-page
+     * fault was verified during development but the test binary is NOT
+     * auto-spawned at boot. Keep user/stacktrip.c and its build wiring so an
+     * interactive launcher (later phase) can run it on demand. */
 
     kprintf("[PHASE8] Spawning shell thread\n");
     process_create_kernel("shell", shell_dummy);

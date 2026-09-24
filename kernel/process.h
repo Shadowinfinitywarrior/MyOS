@@ -9,7 +9,7 @@
 #define MAX_OPEN_FILES   16
 #define PROCESS_NAME_LEN 32
 #define KERNEL_STACK_SIZE 65536
-#define USER_STACK_SIZE   16384
+#define USER_STACK_SIZE   32768
 #define USER_STACK_TOP    0xBFFFF000
 
 /* Process states */

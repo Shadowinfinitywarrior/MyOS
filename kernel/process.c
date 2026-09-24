@@ -198,9 +198,12 @@ process_t *process_create_user(const char *name, const uint8_t *elf_data, uint64
     memset(proc->context.fpu, 0, sizeof(proc->context.fpu));
 
     uint64_t user_stack_bottom = USER_STACK_TOP - USER_STACK_SIZE;
+    /* Phase 2.4 guard page: the page just below the stack is deliberately left
+     * unmapped so a stack overflow faults instead of scribbling over the
+     * adjacent ELF mapping. Stack frames are NX (data, never execute). */
     page_directory_t *old_dir = paging_get_active();
     paging_switch_directory(proc->page_dir);
-    for (uint64_t addr = user_stack_bottom; addr < USER_STACK_TOP; addr += PAGE_SIZE) {
+    for (uint64_t addr = user_stack_bottom + PAGE_SIZE; addr < USER_STACK_TOP; addr += PAGE_SIZE) {
         uint64_t phys = pmm_alloc_page();
         if (!phys) {
             kprintf("[PROC] Failed to allocate user stack page\n");
@@ -208,7 +211,7 @@ process_t *process_create_user(const char *name, const uint8_t *elf_data, uint64
             process_destroy(proc);
             return NULL;
         }
-        paging_map(addr, phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+        paging_map(addr, phys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER | PAGE_NX);
     }
     paging_switch_directory(old_dir);
 
@@ -439,7 +442,7 @@ pid_t process_fork(registers_t *frame) {
         if (!phys) continue;
         uint64_t newphys = pmm_alloc_page();
         if (!newphys) { copy_ok = false; break; }
-        paging_map(addr, newphys, PAGE_PRESENT | PAGE_WRITE | PAGE_USER);
+        paging_map(addr, newphys, paging_get_attrs(addr));
         memcpy((void *)(uintptr_t)addr, (const void *)(uintptr_t)phys, PAGE_SIZE);
     }
     paging_switch_directory(old_dir);

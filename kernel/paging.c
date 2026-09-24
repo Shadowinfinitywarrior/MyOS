@@ -84,7 +84,7 @@ static uint64_t get_pml4_phys(page_directory_t *dir) {
     return v ? (v & ~0xFFFULL) : kernel_pml4_phys;
 }
 
-void paging_map(uint64_t virt, uint64_t phys, uint32_t flags) {
+void paging_map(uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t vaddr = (uint64_t)virt;
     uint64_t paddr = (uint64_t)phys;
     /* User pages must be reachable through every level of the walk: on
@@ -152,6 +152,7 @@ void paging_map(uint64_t virt, uint64_t phys, uint32_t flags) {
     uint64_t entry = (paddr & ~0xFFFULL) | PTE_PRESENT;
     if (flags & PAGE_WRITE) entry |= PTE_WRITE;
     if (flags & PAGE_USER)  entry |= PTE_USER;
+    if (flags & PAGE_NX)    entry |= (1ULL << 63);
     pt[i1] = entry;
     invlpg(vaddr);
 }
@@ -195,7 +196,7 @@ uint64_t paging_get_physical(uint64_t virt) {
     uint64_t *pd = (uint64_t*)(uintptr_t)pd_phys;
     uint64_t pde = pd[i2];
     if (pde & 0x80ULL) { /* 2MB huge page */
-        uint64_t base = pde & ~0x1FFFFFULL;
+        uint64_t base = pde & ~(0x1FFFFFULL | (1ULL << 63));
         return base | (vaddr & 0x1FFFFFULL);
     }
     uint64_t pt_phys = pd[i2] & ~0xFFFULL;
@@ -203,8 +204,37 @@ uint64_t paging_get_physical(uint64_t virt) {
     uint64_t *pt = (uint64_t*)(uintptr_t)pt_phys;
     uint64_t pte = pt[i1];
     if (!(pte & PTE_PRESENT)) return 0;
-    uint64_t base = pte & ~0xFFFULL;
+    /* Mask attributes INCLUDING bit 63 (NX): the returned value must be a
+     * plain physical address, never carrying page permission bits. */
+    uint64_t base = pte & ~(0xFFFULL | (1ULL << 63));
     return base | (vaddr & 0xFFFULL);
+}
+
+/* Return the leaf page-table attributes (low 12 bits + NX bit 63) at virt,
+ * or 0 if the page is not mapped. Used by process_fork to reproduce the
+ * parent's exact permissions (exec/NX/ro/rw) on copied child frames. */
+uint64_t paging_get_attrs(uint64_t virt) {
+    uint64_t vaddr = virt;
+    uint64_t pml4_phys = get_pml4_phys(current_dir());
+    uint64_t *pml4 = (uint64_t*)(uintptr_t)pml4_phys;
+    uint64_t i4 = PML4_IDX(vaddr);
+    uint64_t i3 = PDPT_IDX(vaddr);
+    uint64_t i2 = PD_IDX(vaddr);
+    uint64_t i1 = PT_IDX(vaddr);
+    uint64_t pdpt_phys = pml4[i4] & ~0xFFFULL;
+    if (!pdpt_phys) return 0;
+    uint64_t *pdpt = (uint64_t*)(uintptr_t)pdpt_phys;
+    uint64_t pd_phys = pdpt[i3] & ~0xFFFULL;
+    if (!pd_phys) return 0;
+    uint64_t *pd = (uint64_t*)(uintptr_t)pd_phys;
+    uint64_t pde = pd[i2];
+    if (pde & 0x80ULL) return pde & (0xFFFULL | (1ULL << 63));
+    uint64_t pt_phys = pde & ~0xFFFULL;
+    if (!pt_phys) return 0;
+    uint64_t *pt = (uint64_t*)(uintptr_t)pt_phys;
+    uint64_t pte = pt[i1];
+    if (!(pte & PTE_PRESENT)) return 0;
+    return pte & (0xFFFULL | (1ULL << 63));
 }
 
 page_directory_t *paging_get_directory(void) {

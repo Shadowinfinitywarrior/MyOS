@@ -8,15 +8,17 @@
 #define PAGE_WRITE 2
 #define PAGE_USER 4
 #define PAGE_NOCACHE 16
+#define PAGE_NX (1ULL << 63)
 
 typedef struct page_directory {
     uint64_t entries[1024];
 } page_directory_t;
 
 void paging_init(void);
-void paging_map(uint64_t virt, uint64_t phys, uint32_t flags);
+void paging_map(uint64_t virt, uint64_t phys, uint64_t flags);
 void paging_unmap(uint64_t virt);
 uint64_t paging_get_physical(uint64_t virt);
+uint64_t paging_get_attrs(uint64_t virt);
 page_directory_t *paging_get_directory(void);
 page_directory_t *paging_get_active(void);
 page_directory_t *paging_clone_directory(page_directory_t *src);

@@ -105,8 +105,9 @@ uint64_t elf_load64(page_directory_t *page_dir, const uint8_t *data, uint64_t si
         if (end - start > 256ULL * 1024 * 1024) { ok = 0; break; }
         if (start < ELF_USER_VMA_MIN || start >= ELF_USER_VMA_MAX) { ok = 0; break; }
 
-        uint32_t flags = PAGE_PRESENT | PAGE_USER;
-        if (phdr->p_flags & ELF_PF_W) flags |= PAGE_WRITE;
+        uint64_t flags = PAGE_PRESENT | PAGE_USER;
+        if (phdr->p_flags & ELF_PF_W) flags |= PAGE_WRITE | PAGE_NX;
+        /* writable segments are non-executable (NX data/bss) */
 
         for (uint64_t addr = start; addr < end; addr += PAGE_SIZE) {
             uint64_t phys = paging_get_physical(addr);
@@ -235,10 +236,10 @@ static uint64_t elf_load32(page_directory_t *page_dir, const uint8_t *data, uint
         if (end < start) { ok = 0; break; }
         if (end - start > 128ULL * 1024 * 1024) { ok = 0; break; }
 
-        uint32_t flags = PAGE_PRESENT | PAGE_USER;
-        if (phdr->p_flags & ELF_PF_W) flags |= PAGE_WRITE;
-        /* Execute bits are granted explicitly below only when the segment
-         * requests them; NX enforcement (EFER.NXE) is enabled in Phase 2. */
+        uint64_t flags = PAGE_PRESENT | PAGE_USER;
+        if (phdr->p_flags & ELF_PF_W) flags |= PAGE_WRITE | PAGE_NX;
+        /* Writable segments are non-executable (NX data/bss); read-only
+         * segments (code/rodata) map executable without write access. */
 
         for (uint64_t addr = start; addr < end; addr += PAGE_SIZE) {
             uint64_t phys = paging_get_physical(addr);
