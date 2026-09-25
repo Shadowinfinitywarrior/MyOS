@@ -15,7 +15,11 @@
 #define PD_IDX(v)   (((v) >> 21) & 0x1FFULL)
 #define PT_IDX(v)   (((v) >> 12) & 0x1FFULL)
 
-static page_directory_t physical_directory[8];
+#define PAGING_MAX_DIRS 256
+static page_directory_t kernel_dir;
+static page_directory_t dir_pool[PAGING_MAX_DIRS];
+static page_directory_t *dir_free_list;
+static page_directory_t *dir_live_list;
 static uint64_t kernel_pml4_phys = 0;
 static page_directory_t *active_dir = NULL;
 
@@ -27,7 +31,15 @@ static inline void invlpg(uint64_t addr) {
 }
 
 void paging_init(void) {
-    active_dir = &physical_directory[0];
+    active_dir = &kernel_dir;
+    dir_free_list = NULL;
+    dir_live_list = NULL;
+    memset(dir_pool, 0, sizeof(dir_pool));
+    for (int i = PAGING_MAX_DIRS - 1; i >= 0; i--) {
+        dir_pool[i].pml4_phys = 0;
+        dir_pool[i].next = dir_free_list;
+        dir_free_list = &dir_pool[i];
+    }
     kprintf("[PAGING] active_dir set to %p\n", (void*)active_dir);
     kprintf("paging_init: start\n");
     uint64_t phys = pmm_alloc_page();
@@ -36,6 +48,7 @@ void paging_init(void) {
         return;
     }
     kernel_pml4_phys = phys;
+    kernel_dir.pml4_phys = phys;
     kprintf("paging_init: memset phys\n");
     memset((void*)(uintptr_t)phys, 0, PAGE_SIZE);
     uint64_t *pml4 = (uint64_t*)(uintptr_t)phys;
@@ -80,8 +93,7 @@ static page_directory_t *current_dir(void) {
 
 static uint64_t get_pml4_phys(page_directory_t *dir) {
     if (!dir) return kernel_pml4_phys;
-    uint64_t v = dir->entries[0];
-    return v ? (v & ~0xFFFULL) : kernel_pml4_phys;
+    return dir->pml4_phys ? dir->pml4_phys : kernel_pml4_phys;
 }
 
 void paging_map(uint64_t virt, uint64_t phys, uint64_t flags) {
@@ -238,7 +250,7 @@ uint64_t paging_get_attrs(uint64_t virt) {
 }
 
 page_directory_t *paging_get_directory(void) {
-    return &physical_directory[0];
+    return &kernel_dir;
 }
 
 /* The directory the CPU is currently running under. Per-process map/restore
@@ -249,23 +261,32 @@ page_directory_t *paging_get_active(void) {
     return active_dir;
 }
 
-/* Debug: print the PML4 physical frame of every page-directory slot. */
+/* Debug: print the PML4 physical frame of the kernel directory and every
+ * address space currently checked out of the slot pool. */
 void paging_dump_dirs(void) {
-    serial_printf("[PAGING] dirs:");
-    for (int i = 0; i < 8; i++)
-        serial_printf(" [%d]=0x%lx", i,
-                      (unsigned long)(physical_directory[i].entries[0] & ~0xFFFULL));
-    serial_printf("\n");
+    serial_printf("[PAGING] dirs: [kernel]=0x%lx",
+                  (unsigned long)kernel_pml4_phys);
+    for (page_directory_t *d = dir_live_list; d; d = d->next)
+        serial_printf(" [0x%lx]", (unsigned long)d->pml4_phys);
+    int free_count = 0;
+    for (page_directory_t *f = dir_free_list; f; f = f->next) free_count++;
+    serial_printf(" free=%d\n", free_count);
 }
 
 page_directory_t *paging_clone_directory(page_directory_t *src) {
     if (!src) return NULL;
-    static int next_idx = 1;
-    if (next_idx >= 8) return NULL;
-    page_directory_t *dst = &physical_directory[next_idx++];
+    page_directory_t *dst = dir_free_list;
+    if (!dst) return NULL;
+    dir_free_list = dst->next;
+    dst->next = NULL;
+    dst->pml4_phys = 0;
     uint64_t src_pml4 = get_pml4_phys(src);
     uint64_t new_pml4 = pmm_alloc_page();
-    if (!new_pml4) return NULL;
+    if (!new_pml4) {
+        dst->next = dir_free_list;
+        dir_free_list = dst;
+        return NULL;
+    }
     memset((void*)(uintptr_t)new_pml4, 0, PAGE_SIZE);
     uint64_t *src_pml4_ptr = (uint64_t*)(uintptr_t)src_pml4;
     uint64_t *dst_pml4_ptr = (uint64_t*)(uintptr_t)new_pml4;
@@ -331,8 +352,51 @@ page_directory_t *paging_clone_directory(page_directory_t *src) {
         }
         dst_pml4_ptr[i] = dst_pdpt | flags;
     }
-    dst->entries[0] = new_pml4;
+    dst->pml4_phys = new_pml4;
+    dst->next = dir_live_list;
+    dir_live_list = dst;
     return dst;
+}
+
+/* Release an address space. The caller must already have freed and unmapped
+ * the process's data frames (process_destroy walks the user VMA for exactly
+ * that reason): this reclaims only the page-table pages, which the clone owns
+ * outright because cloning deep-copies the kernel's PML4/PDPT/PD subtrees
+ * rather than sharing them. 2 MiB leaves are left alone -- they are identity
+ * mappings, not allocations. The slot then returns to the pool. */
+void paging_free_directory(page_directory_t *dir) {
+    if (!dir || dir == &kernel_dir) return;
+    uint64_t pml4_phys = dir->pml4_phys;
+    if (!pml4_phys) return;
+
+    uint64_t *pml4 = (uint64_t*)(uintptr_t)pml4_phys;
+    for (int i = 0; i < 512; i++) {
+        uint64_t e = pml4[i];
+        if (!e || !(e & PTE_PRESENT)) continue;
+        uint64_t *pdpt = (uint64_t*)(uintptr_t)(e & ~0xFFFULL);
+        for (int j = 0; j < 512; j++) {
+            uint64_t e2 = pdpt[j];
+            if (!e2 || !(e2 & PTE_PRESENT)) continue;
+            uint64_t *pd = (uint64_t*)(uintptr_t)(e2 & ~0xFFFULL);
+            for (int k = 0; k < 512; k++) {
+                uint64_t e3 = pd[k];
+                if (!e3 || !(e3 & PTE_PRESENT) || (e3 & PTE_PS)) continue;
+                pmm_free_page(e3 & ~0xFFFULL);
+            }
+            pmm_free_page(e2 & ~0xFFFULL);
+        }
+        pmm_free_page(e & ~0xFFFULL);
+    }
+    pmm_free_page(pml4_phys);
+
+    dir->pml4_phys = 0;
+    page_directory_t **pp = &dir_live_list;
+    while (*pp) {
+        if (*pp == dir) { *pp = dir->next; break; }
+        pp = &(*pp)->next;
+    }
+    dir->next = dir_free_list;
+    dir_free_list = dir;
 }
 
 void paging_switch_directory(page_directory_t *dir) {

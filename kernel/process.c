@@ -274,6 +274,15 @@ void process_destroy(process_t *proc) {
                 paging_unmap(addr);
             }
         }
+        /* The address space is finished with: leave it for good before its
+         * page tables are released. The caller's context must never resume
+         * under it, so if that is where we came from, fall back to the
+         * kernel directory. */
+        if (old_dir == proc->page_dir)
+            old_dir = paging_get_directory();
+        paging_switch_directory(paging_get_directory());
+        paging_free_directory(proc->page_dir);
+        proc->page_dir = NULL;
         paging_switch_directory(old_dir);
     }
     proc->state = PROC_UNUSED;
@@ -293,6 +302,7 @@ void process_exit(int code) {
     cli();
     proc->exit_code = code;
     proc->state = PROC_ZOMBIE;
+    scheduler_remove(proc);
 
     /* Reparent children to init (PID 1) */
     for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -552,6 +562,7 @@ int process_kill(pid_t pid, int signal) {
     }
 
     proc->state = PROC_ZOMBIE;
+    scheduler_remove(proc);
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (process_table[i].state != PROC_UNUSED &&
             process_table[i].ppid == proc->pid)

@@ -46,11 +46,17 @@
 - [ ] **CP-2 — no userspace entry point.** `kernel/init.c:6-13` `init_start()` (which would
   `process_create_user("/sbin/init")`) is **never called** (only its decl in `init.h:4`).
   The live shell is a kernel thread (`init_phase8.c:180 shell_dummy`).
-- [ ] **CP-3 — address spaces are capped at 7.** `kernel/paging.c:18-20` has 8 static
+- [x] **CP-3 — address spaces are capped at 7.** `kernel/paging.c:18-20` has 8 static
   directory slots with a monotonic `next_idx` (`paging.c:261-265,334-335`) that is **never
   reclaimed**; `kernel/process.c:251-280` frees user frames but not cloned page-table
   frames or slots. `process.h:8` allows 256 processes — the 100-fork gate (3.6) is
-  impossible until slots are recycled.
+  impossible until slots are recycled. **Fixed:** compact `page_directory_t` (16 bytes vs
+  8 KiB), dynamic pool of 256 slots (`dir_pool`) with free/live lists,
+  `paging_free_directory` that walks the cloned tree and frees every PT/PD/PDPT/PML4
+  page back to the PMM, plus a `paging_dump_dirs` that prints the live set.
+  `process_destroy` now calls `paging_free_directory` after freeing the user VMA frames,
+  so the slot returns to the pool immediately. Verified by running the full test suite
+  with 256-slot pool — no more slot exhaustion.
 - [x] **CP-4 — the user-pointer ABI was unsafe under SMEP.** `kernel/syscall.c:34-45,80-120`
   `memcpy`'d from/to user pointers after only a range check, while
   `kernel/syscall64.c:67-73` enables SMEP → those accesses fault. Separately
