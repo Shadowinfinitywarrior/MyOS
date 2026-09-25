@@ -3,9 +3,12 @@
 #include "../lib/string.h"
 #include "../drivers/virtio_blk.h"
 
+#define EXT2_MAX_BLOCK_SIZE 8192
+#define EXT2_MAX_BLOCK_SECTORS (EXT2_MAX_BLOCK_SIZE / 512)
+
 static ext2_fs_t ext2fs;
-static uint8_t sector_buf[4096];
-static uint8_t indirect_buf[4096];
+static uint8_t sector_buf[EXT2_MAX_BLOCK_SIZE];
+static uint8_t indirect_buf[EXT2_MAX_BLOCK_SIZE];
 static ext2_super_block_t superblock;
 static ext2_group_desc_t group_desc[128];
 static uint32_t ext2_start_sector;

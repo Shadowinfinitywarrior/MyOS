@@ -4,8 +4,10 @@
 #include "../include/types.h"
 
 #define VFS_NAME_MAX 256
+#define VFS_DCACHE_SIZE 256
 
 typedef struct vfs_node vfs_node_t;
+typedef struct vfs_dentry vfs_dentry_t;
 
 typedef int (*read_fn)(vfs_node_t *node, uint32_t offset, uint32_t size, void *buf);
 typedef int (*write_fn)(vfs_node_t *node, uint32_t offset, uint32_t size, const void *buf);
@@ -29,11 +31,20 @@ struct vfs_node {
 #define VFS_FILE 0x01
 #define VFS_DIRECTORY 0x02
 
+struct vfs_dentry {
+    char name[VFS_NAME_MAX];
+    vfs_node_t *node;
+    struct vfs_dentry *next;
+    struct vfs_dentry *prev;
+};
+
 void vfs_init(void);
 void vfs_set_root(vfs_node_t *root);
 vfs_node_t *vfs_resolve_path(const char *path);
 vfs_node_t *vfs_finddir(vfs_node_t *node, const char *name);
 int vfs_read(vfs_node_t *node, uint32_t offset, uint32_t size, void *buf);
 int vfs_write(vfs_node_t *node, uint32_t offset, uint32_t size, const void *buf);
+void vfs_dcache_add(const char *path, vfs_node_t *node);
+vfs_node_t *vfs_dcache_lookup(const char *path);
 
 #endif
