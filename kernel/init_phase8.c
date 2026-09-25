@@ -147,6 +147,22 @@ void init_phase8(void) {
 
     virtio_init();
     virtio_blk_init();
+    {
+        uint64_t bcap = virtio_blk_get_capacity();
+        if (bcap) {
+            uint8_t probe[512];
+            if (virtio_blk_read(0, 1, probe) == 0) {
+                uint32_t sum = 0;
+                for (int i = 0; i < 512; i++) sum += probe[i];
+                kprintf("[VIRTIO-BLK] selftest sector0 read ok (%llu sectors) magic=%02x%02x%02x%02x sum=%u\n",
+                        (unsigned long long)bcap, probe[0], probe[1], probe[2], probe[3], sum);
+            } else {
+                kprintf("[VIRTIO-BLK] selftest sector0 read FAILED\n");
+            }
+        } else {
+            kprintf("[VIRTIO-BLK] selftest skipped: no device\n");
+        }
+    }
     virtio_net_init();
     socket_init();
 

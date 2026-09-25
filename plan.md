@@ -27,10 +27,22 @@
 
 ## True Critical Path (unblocks every later phase; do these first)
 
-- [ ] **CP-1 — virtio is dead in every run target.** `drivers/virtio.c:10-11,67` probes
-  legacy MMIO `0xD0000000` only, while `Makefile:148,151,154` request `-device
-  virtio-blk-pci`/`virtio-net-pci`. Live log: `[VIRTIO] 0 devices`. **No block device ⇒
-  no persistent FS ⇒ Phase 5/8.5 unreachable.** Add PCI transport enumeration.
+- [x] **CP-1 — virtio is dead in every run target.** `drivers/virtio.c` probed legacy MMIO
+  `0xD0000000` only while `Makefile:148,151,154` requested `-device virtio-blk-pci`, so the
+  live log read `[VIRTIO] 0 devices` and there was no block device at all.
+  **Fixed:** modern virtio-1.0 PCI transport. Walks the vendor capability list
+  (`PCI_CAP_ID_VNDR` → COMMON_CFG/NOTIFY_CFG/DEVICE_CFG), sizes and identity-maps BAR4,
+  enables IO+Memory+BusMaster, negotiates `VIRTIO_F_VERSION_1`, and drives the split
+  virtqueue. Verified: both blk and net enumerate, and sector 0 reads back a known
+  signature with a matching checksum. `Makefile` now attaches a `virtio-blk-pci` data
+  disk to all three run targets, and gained `-MMD -MP` header dependency tracking
+  (previously a header-only edit did **not** trigger a rebuild, so fixes silently
+  vanished). Also fixed along the way: `pmm_alloc_contiguous()` for physically
+  contiguous vrings; 64-bit (not 32-bit) `queue_desc`/`driver`/`device` in the common
+  cfg; `paging_get_physical()` for DMA descriptor addresses; a real free-list with
+  descriptor recycling (the old queue wedged permanently after 16 I/Os); the blk
+  request header's `sector` field at offset 8 (it was at offset 4, so **every request
+  silently hit sector 0**).
 - [ ] **CP-2 — no userspace entry point.** `kernel/init.c:6-13` `init_start()` (which would
   `process_create_user("/sbin/init")`) is **never called** (only its decl in `init.h:4`).
   The live shell is a kernel thread (`init_phase8.c:180 shell_dummy`).
@@ -153,11 +165,15 @@
 
 ## Phase 4 — Drivers (storage, display, net, input)
 
-- [~] 4.1 virtio-blk transport is incomplete: legacy-MMIO-only probe (CP-1), so no device
-  is found. `drivers/ahci.c:63-64` and `drivers/nvme.c:7-8` are lie-success stubs
-  (`return 0`, no probe/DMA) and must be deleted per the "delete, don't hide" rule.
-- [ ] 4.2 virtio-net: `net/net.c:4 net_current_driver` is `NULL`; `net/net.c:27` poll is
-  empty. No rx/tx virtqueues, no MAC-from-config-space, no IRQ integration.
+- [~] 4.1 virtio-blk **is now real** — see CP-1. Still to do: multi-queue (QEMU offers
+  1), flush/fua support, and discard/write-zeroes. `drivers/ahci.c:63-64` and
+  `drivers/nvme.c:7-8` remain lie-success stubs (`return 0`, no probe/DMA) and must be
+  deleted per the "delete, don't hide" rule.
+- [~] 4.2 virtio-net: the device now **enumerates** over virtio-pci (CP-1) and
+  `virtio_net_init` runs, but there is no data path — `net/net.c:4 net_current_driver` is
+  `NULL` and `net/net.c:27` poll is empty. No rx/tx virtqueues, no MAC-from-config-space,
+  no IRQ integration. The driver must now register its queues with
+  `virtio_find_device(VIRTIO_DEV_NET)` instead of giving up.
 - [ ] 4.3 virtio-gpu is an empty stub (`drivers/virtio_gpu.c:7-9`). No 2D mode, no scanout,
   no resource flush. `drivers/framebuffer.c:138` still writes straight to the BAR.
 - [~] 4.4 `fb_wait_vsync` is a **real bounded port poll** (`drivers/framebuffer.c:127-132`),

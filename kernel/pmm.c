@@ -139,6 +139,37 @@ uint64_t pmm_alloc_page(void) {
     return result;
 }
 
+uint64_t pmm_alloc_contiguous(uint32_t pages) {
+    if (pages == 0) return 0;
+    const uint64_t eflags = read_eflags();
+    cli();
+    uint64_t result = 0;
+    uint64_t offset = 0;
+    for (uint32_t r = 0; r < region_count && result == 0; r++) {
+        uint64_t rp = region_pages[r];
+        uint64_t run = 0;
+        for (uint64_t p = 0; p < rp; p++) {
+            if (bitmap_test(offset + p)) {
+                run = 0;
+                continue;
+            }
+            run++;
+            if (run == pages) {
+                uint64_t start_page = p - pages + 1;
+                for (uint64_t k = 0; k < pages; k++) {
+                    bitmap_set(offset + start_page + k);
+                }
+                free_pages -= pages;
+                result = region_start[r] + start_page * PAGE_SIZE;
+                break;
+            }
+        }
+        offset += rp;
+    }
+    if (eflags & (1ULL << 9)) sti();
+    return result;
+}
+
 void pmm_free_page(uint64_t phys) {
     if (phys == 0) return;
     const uint64_t eflags = read_eflags();

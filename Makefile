@@ -4,8 +4,8 @@ LD = ld
 AS = nasm
 OBJCOPY = objcopy
 
-CFLAGS = -ffreestanding -fno-builtin -fno-stack-protector -O2 -Wall -Wextra -Werror -nostdlib -nostdinc -m64 -mno-red-zone -fcf-protection=none -Iinclude -Idrivers -Ikernel -Ifs -Inet -Iuser -Ilib -DMYOS_SSE2=1 -DMYOS_PERF=1
-USER_CFLAGS = -ffreestanding -fno-builtin -fno-stack-protector -O2 -Wall -Wextra -Werror -nostdlib -nostdinc -m64 -mno-red-zone -fcf-protection=none -fno-pie -fno-stack-check -Iinclude -Iuser
+CFLAGS = -ffreestanding -fno-builtin -fno-stack-protector -O2 -Wall -Wextra -Werror -nostdlib -nostdinc -m64 -mno-red-zone -fcf-protection=none -MMD -MP -Iinclude -Idrivers -Ikernel -Ifs -Inet -Iuser -Ilib -DMYOS_SSE2=1 -DMYOS_PERF=1
+USER_CFLAGS = -ffreestanding -fno-builtin -fno-stack-protector -O2 -Wall -Wextra -Werror -nostdlib -nostdinc -m64 -mno-red-zone -fcf-protection=none -fno-pie -fno-stack-check -MMD -MP -Iinclude -Iuser
 LDFLAGS = -T scripts/linker.ld -nostdlib
 ASFLAGS = -f elf64
 
@@ -144,17 +144,24 @@ $(BUILD)/uefi.img: $(BUILD)/esp.img | $(BUILD)
 $(BUILD):
 	mkdir -p $(BUILD)
 
-run: $(BUILD)/myos.img
-	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -vga std -display gtk,gl=off -no-reboot
+$(BUILD)/data.img: | $(BUILD)
+	dd if=/dev/zero of=$@ bs=1M count=32 2>/dev/null
 
-run-usb: $(BUILD)/myos.img
-	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0,hostfwd=tcp::8080-:80 -device virtio-net-pci,netdev=n0 -device qemu-xhci -device usb-kbd -device usb-mouse -vga std -nographic -no-reboot
+VIRTIO_BLK = -drive file=$(BUILD)/data.img,format=raw,if=none,id=vd0 -device virtio-blk-pci,drive=vd0
 
-run-headless: $(BUILD)/myos.img
-	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -serial stdio -debugcon file:debug.log -netdev user,id=n0 -device virtio-net-pci,netdev=n0 -vga std -display none -no-reboot
+run: $(BUILD)/myos.img $(BUILD)/data.img
+	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 $(VIRTIO_BLK) -vga std -display gtk,gl=off -no-reboot
+
+run-usb: $(BUILD)/myos.img $(BUILD)/data.img
+	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0,hostfwd=tcp::8080-:80 -device virtio-net-pci,netdev=n0 -device qemu-xhci -device usb-kbd -device usb-mouse $(VIRTIO_BLK) -vga std -nographic -no-reboot
+
+run-headless: $(BUILD)/myos.img $(BUILD)/data.img
+	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -serial stdio -debugcon file:debug.log -netdev user,id=n0 -device virtio-net-pci,netdev=n0 $(VIRTIO_BLK) -vga std -display none -no-reboot
 
 clean:
 	rm -rf $(BUILD)
 
 qa:
 	@bash tests/qa/run_qa.sh
+
+-include $(BUILD)/*.d
