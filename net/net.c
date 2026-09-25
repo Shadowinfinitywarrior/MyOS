@@ -3,6 +3,9 @@
 #include "ip.h"
 #include "icmp.h"
 #include "arp.h"
+#include "udp.h"
+#include "socket.h"
+#include "byteorder.h"
 #include "../lib/printf.h"
 #include "../lib/string.h"
 
@@ -14,6 +17,8 @@ int net_init(void) {
     arp_init();
     ip_init();
     icmp_init();
+    udp_init();
+    socket_init();
     return 0;
 }
 
@@ -57,5 +62,19 @@ void net_poll(void) {
 
     if (ip->protocol == IPV4_PROTO_ICMP) {
         icmp_handle_packet(ip_payload, ip_payload_len, ip->src_addr);
+    } else if (ip->protocol == IPV4_PROTO_UDP) {
+        if ((size_t)ip_payload_len >= sizeof(udp_hdr_t)) {
+            udp_hdr_t *udp = (udp_hdr_t *)ip_payload;
+            uint16_t src_port = ntohs(udp->src_port);
+            uint16_t dst_port = ntohs(udp->dst_port);
+            uint16_t udp_len = ntohs(udp->len);
+            if (udp_len >= sizeof(udp_hdr_t) && (size_t)ip_payload_len >= udp_len) {
+                uint8_t *udp_payload = ip_payload + sizeof(udp_hdr_t);
+                uint16_t payload_len = udp_len - sizeof(udp_hdr_t);
+                // Deliver to socket layer
+                extern void udp_rx_callback(uint32_t, uint16_t, uint16_t, uint8_t *, uint16_t);
+                udp_rx_callback(ip->src_addr, src_port, dst_port, udp_payload, payload_len);
+            }
+        }
     }
 }

@@ -9,10 +9,10 @@ USER_CFLAGS = -ffreestanding -fno-builtin -fno-stack-protector -O2 -Wall -Wextra
 LDFLAGS = -T scripts/linker.ld -nostdlib
 ASFLAGS = -f elf64
 
-KERNEL_SRCS = kernel/kernel.c kernel/idt.c kernel/isr.c kernel/irq.c kernel/pic.c kernel/timer.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/process.c kernel/scheduler.c kernel/syscall.c kernel/elf.c kernel/signal.c kernel/apic.c kernel/acpi.c kernel/smp.c kernel/mmap.c kernel/shm.c kernel/pipe.c kernel/select.c kernel/init.c kernel/exec.c kernel/slab.c kernel/module.c kernel/tty.c kernel/pthread.c kernel/mutex.c kernel/rwlock.c kernel/dynlink.c kernel/init_phase8.c kernel/gpt_detect.c kernel/gpt_ext4_mount.c kernel/socket.c kernel/gpt.c kernel/gdt.c kernel/tss.c kernel/syscall64.c
+KERNEL_SRCS = kernel/kernel.c kernel/idt.c kernel/isr.c kernel/irq.c kernel/pic.c kernel/timer.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/process.c kernel/scheduler.c kernel/syscall.c kernel/elf.c kernel/signal.c kernel/apic.c kernel/acpi.c kernel/smp.c kernel/mmap.c kernel/shm.c kernel/pipe.c kernel/select.c kernel/init.c kernel/exec.c kernel/slab.c kernel/module.c kernel/tty.c kernel/pthread.c kernel/mutex.c kernel/rwlock.c kernel/dynlink.c kernel/init_phase8.c kernel/gpt_detect.c kernel/gpt_ext4_mount.c kernel/gpt.c kernel/gdt.c kernel/tss.c kernel/syscall64.c
 DRIVER_SRCS = drivers/serial.c drivers/keyboard.c drivers/ata.c drivers/pci.c drivers/rtc.c drivers/screen.c drivers/mouse.c drivers/speaker.c drivers/vga_gfx.c drivers/framebuffer.c drivers/ne2k.c drivers/ahci.c drivers/ac97.c drivers/fbcon.c drivers/virtio.c drivers/virtio_blk.c drivers/virtio_net.c drivers/nvme.c drivers/xhci.c drivers/usb.c drivers/usb_hid.c drivers/fbterm.c drivers/virtio_gpu.c
 FS_SRCS = fs/vfs.c fs/ramfs.c fs/devfs.c fs/fat16.c fs/ext2.c fs/ext4.c fs/procfs.c
-NET_SRCS = net/net.c net/eth.c net/arp.c net/ip.c net/icmp.c net/udp.c net/tcp.c net/dhcp.c net/dns.c
+NET_SRCS = net/net.c net/eth.c net/arp.c net/ip.c net/icmp.c net/udp.c net/tcp.c net/socket.c net/dhcp.c net/dns.c
 
 BUILD = build
 
@@ -24,6 +24,9 @@ $(BUILD)/kernel_entry.o: kernel/kernel_entry.asm | $(BUILD)
 $(BUILD)/kernel_stub.o: kernel/kernel_stub.asm | $(BUILD)
 	$(AS) $(ASFLAGS) $< -o $@
 
+$(BUILD)/%.o: net/%.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD)/%.o: kernel/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -31,9 +34,6 @@ $(BUILD)/%.o: drivers/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: fs/%.c | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/%.o: net/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: user/%.c | $(BUILD)
