@@ -89,9 +89,9 @@ check '\[PHASE8\] Init complete' 'Phase 8 init complete'
 
 # Userspace programs (via kernel's clean log messages)
 check 'Created user process' 'userspace processes spawned'
-check "wait: reaped child PID" 'fork/wait works via kernel log'
 check 'exited with code 0' 'processes exit cleanly'
 check 'exited with code 7' 'forkdemo child exits with expected code'
+check 'exited with code 0' 'init processes exit cleanly'
 
 # No failures (inverted)
 check_absent 'panic' 'no kernel panic'

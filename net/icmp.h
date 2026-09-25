@@ -16,6 +16,6 @@ typedef struct icmp_hdr {
 
 int icmp_init(void);
 int icmp_send_echo(uint32_t dst, uint16_t id, uint16_t seq);
-int icmp_handle_packet(uint8_t *buf, uint16_t len);
+int icmp_handle_packet(uint8_t *buf, uint16_t len, uint32_t src_ip);
 
 #endif
