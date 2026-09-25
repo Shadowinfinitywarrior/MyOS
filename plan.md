@@ -78,10 +78,16 @@
   directly needs no `CR4.AC` and is what SMEP keys off. **SMEP is now genuinely
   exercised** under `-cpu max`; QEMU's default `qemu64` does not implement SMEP, which
   is why the old direct `memcpy` appeared to work.
-- [ ] **CP-5 — QA harness cannot fail.** `tests/qa/run_qa.sh:18-21` greps for four log
-  strings (`[COMP]`, `[INPUT] ring overflow`, `[RTFIX]`, `fps=`) that **no code emits**, and
-  its `grep -c … && echo FAIL || echo PASS` inverts the result. Every phase gate is
-  currently a no-op. Replace with QMP-driven assertions + CI. Highest leverage per line
+- [x] **CP-5 — QA harness cannot fail.** `tests/qa/run_qa.sh:18-21` greps for four log
+  strings (`[COMP]`, `[INPUT] ring overflow`, `[RTFIX]`, `fps=`) that **no code emits**,
+  and its `grep -c … && echo FAIL || echo PASS` inverts the result. Every phase gate
+  is currently a no-op. **Fixed:** replaced with a self-contained test that builds,
+  boots with a seeded virtio-blk scratch disk and virtio-net, waits for `[PHASE8]
+  Init complete`, then asserts 17 concrete checks against the kernel's clean serial
+  log: PMM/paging/syscall init, CPU features, virtio-blk/net enumeration + block
+  read signature, Phase 8 init, userspace spawn/fork/wait/exit via kernel's clean
+  `[PROC]` logs, and zero panics/exceptions/page-faults. Runs in ~40s on `-cpu max`
+  (SMEP) and default qemu64; exits 0 on success, non-zero on any failure.
   in the repo: it is what makes any "done" claim trustworthy.
 
 ---
