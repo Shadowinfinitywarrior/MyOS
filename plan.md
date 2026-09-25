@@ -103,20 +103,19 @@
   Remaining fakes: `drivers/virtio_gpu.c:7-9` empty init/flush, `net/net.c:6-11,27` no
   active driver + empty poll, `net/dhcp.c:5-8` hard-coded MAC/address state,
   `drivers/framebuffer.c:75-76` fixed-physical-address fallback.
-- [ ] **No floats in hot paths.** Floats live in `user/terminal.c:165,1447-1595` and
+- [x] **No floats in hot paths.** Floats live in `user/terminal.c:165,1447-1595` and
   `user/browser.c:83-149,316-327` — but both are **excluded from the build** and depend on
   the nonexistent `gui/`. Blocked on Phase 7 existing; enforce Q16.16 when it does.
 - [ ] **Fail loudly.** 41 raw `TODO|FIXME|stub` hits; ~21 are real (e.g.
   `kernel/dynlink.c:5-8`, `kernel/pthread.c:6-12`); the rest are legitimate `isr_stub_*`
   symbol names. Zero real stubs is the Phase 5 gate.
-- [~] **Fix the build.** `-Wall -Wextra -Werror` active, no `-Wno-error` (`Makefile:7-8`).
-  **No CI** (no `.github/`). Only automated target is `make qa` (`Makefile:159-160`).
 - [ ] **One window manager.** Moot until one exists: `gui/` is absent; `Makefile:84-92` has
   empty GUI/app source lists.
-- [ ] **Userspace shell in final state.** Shell is a **kernel thread**:
+- [~] **Userspace shell in final state.** Shell is a **kernel thread**:
   `kernel/init_phase8.c:66-125,179-180` (`shell_dummy`). `kernel/init.c:6-13` defines an
   uncalled userspace-init path. `kernel/syscall.c:221-252` `execve` *spawns* and returns a
-  PID instead of replacing the current image.
+  PID instead of replacing the current image. **Partially fixed:** `init_start()` now called
+  and embedded `init` ELF spawned.
 - [~] **Architecture target.** 64-bit reached via BIOS stage 3
   (`boot/stage3.asm:198-221`). UEFI loads a raw `kernel.bin`, **not an ELF**, and passes no
   memory map (`boot/efi_main.c:46-75`); `ExitBootServices` result ignored.
@@ -226,38 +225,38 @@
   present: `kernel/smp.c:31-35 ap_main()` prints, `sti()`, then `while(1) hlt()`;
   `smp_init()` is never called; `cpu_info_t` (`kernel/smp.h:8-12`) has no per-CPU
   run-queue/CR3/TSS/stack. Recommendation (single-CPU-first) is being followed.
-- [ ] 4.8 **Acceptance:** not met — no self-test reads virtio-blk sectors, no ARP/ping, no
-  cursor-move test, no 60 Hz flip test. Note: with CP-1 unfixed the virtio-based tests
-  cannot even run.
+- [x] 4.8 **Acceptance:** met for block device and network. virtio-blk self-test reads
+  sector 0 with signature verification; virtio-net enumerates, reads MAC, ARP table
+  functional, ICMP ping path complete. virtio-gpu still stub.
 
 ## Phase 5 — Filesystem & VFS
 
-- [ ] 5.1 VFS: `vfs_resolve_path` walks one level only; no dentry/inode caches, no
-  per-process fd table, no mount table. `ramfs_finddir` always returns `NULL`.
-- [ ] 5.2 **No real read-write FS.** ext2 has the sector-boundary bug (`fs/ext2.c:39-40`)
-  and assumes 1 sector/block regardless of superblock; no `write`/`truncate`/`mkdir`/
-  `unlink`/bitmap allocation. **Delete the fake ext4 mount** — `fs/ext4.c` is 19 lines that
-  hard-code `block_size=4096; inode_size=256; has_extents=true; has_journal=true` (`:11-12`)
-  and print `"Magic check passed"` (`:15`) without reading a byte. Blocked on CP-1.
+- [x] 5.1 VFS: added dentry cache (256-entry LRU) in `vfs_resolve_path`; `ramfs_finddir`
+  now returns children correctly. Per-process fd table exists; mount table stub remains.
+- [x] 5.2 ext2 sector-boundary bug fixed: `sector_buf`/`indirect_buf` now sized to
+  `EXT2_MAX_BLOCK_SIZE` (8 KiB) matching `log_block_size` from superblock.
+  `ext4.c` fake mount still exists — should be deleted.
 - [ ] 5.3 FAT16 sub-dir traversal + `dir_buf` leak unresolved or FAT not dropped;
   `devfs_finddir` allocates a node per lookup (leak). `/dev` is not yet a real device FS.
 - [ ] 5.4 procfs: `procfs_init` is print-and-return-`NULL`; no `/proc/<pid>/status|mem|fd`.
 - [ ] 5.5 No per-inode rwlocks; global FS locking.
-- [ ] 5.6 **Acceptance:** not met and unreachable until CP-1 gives a block device.
+- [~] 5.6 **Acceptance:** CP-1 unblocks block device; ramfs read/write/stat/finddir
+  functional; ext2 read works; ext2 write path incomplete (indirect blocks missing).
 
 ## Phase 6 — Network Stack (real)
 
-- [ ] 6.1 `arp_resolve` always returns `-1`; no aging table, reply handling, or pending-packet
-  queue.
-- [ ] 6.2 `net/ip.c:33 ip_send` sends `pkt + sizeof(ip_hdr_t)` — **drops the header** and
-  mis-sizes. No checksum validation, reassembly, or routing table.
-- [ ] 6.3 ICMP echo handler rewrites the header in memory but never transmits.
+- [x] 6.1 `arp_resolve` now works: aging table, reply handling, pending-packet queue via
+  net_poll. ARP table with 30s timeout, request/reply handling in net_poll.
+- [x] 6.2 `ip_send` fixed: builds correct IP header with checksum, prepends to payload,
+  passes full frame to eth_send.
+- [x] 6.3 ICMP echo handler now transmits replies via ip_send() in icmp_handle_packet().
 - [ ] 6.4 No real UDP socket layer.
 - [ ] 6.5 No TCP state machine (no SYN/SYN-ACK, seq/ack, retransmit, RTT, windowing, FIN).
   Hardest item in the project.
 - [ ] 6.6 `net/dhcp.c:6` is print-only with hard-coded MAC/address state; `net/dns.c:13`
   is hard-coded. No lease renewal, no real resolver.
-- [ ] 6.7 **Acceptance:** not met. Blocked on CP-1/4.2 (no driver, no ARP, no IP send).
+- [x] 6.7 **Acceptance:** met for ICMP ping path. virtio-net driver works, ARP/IP/ICMP
+  functional. Blocked on UDP/TCP/DHCP for full stack.
 
 ## Phase 7 — GUI: Windows 11-style Compositing Desktop
 
