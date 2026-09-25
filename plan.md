@@ -51,11 +51,27 @@
   reclaimed**; `kernel/process.c:251-280` frees user frames but not cloned page-table
   frames or slots. `process.h:8` allows 256 processes — the 100-fork gate (3.6) is
   impossible until slots are recycled.
-- [ ] **CP-4 — the user-pointer ABI is unsafe under SMEP.** `kernel/syscall.c:34-45,80-120`
-  `memcpy`s from/to user pointers after only a range check, while
+- [x] **CP-4 — the user-pointer ABI was unsafe under SMEP.** `kernel/syscall.c:34-45,80-120`
+  `memcpy`'d from/to user pointers after only a range check, while
   `kernel/syscall64.c:67-73` enables SMEP → those accesses fault. Separately
-  `user/libc.c:54-65` **truncates 64-bit user pointers to `int`** in `read`/`write`.
-  Route all through `copy_from_user`/`copy_to_user` (or `stac`/`clac`).
+  `user/libc.c:54-65` **truncated 64-bit user pointers to `int`** in `read`/`write`.
+  **Fixed:** `copy_from_user`/`copy_to_user` now wrap `memcpy` in `stac`/`clac`;
+  `sys_read`/`sys_write` bounce through a 256-byte kernel buffer so the VFS and keyboard
+  never see a user address; `sys_wait`'s status write-back goes through `copy_to_user`;
+  and `copy_str_from_user` reads user paths byte-at-a-time so `sys_open`/`sys_execve`
+  cannot fault by over-reading past the final page. The user half passes full 64-bit
+  `(long)` pointers, and the two `#pragma GCC diagnostic ignored` lines that hid the
+  resulting `-Werror` failure are deleted. The stack sits at `0xBFFFF000`
+  (`kernel/process.h:13`), so `(int)buf` sign-extended to `0xFFFFFFFFBFFFF000` and
+  `in_user_range` rejected it: **every `read`/`write` through a stack buffer silently
+  returned -1** — `user/cat.c:17-21` is exactly that pattern. Verified by A/B test: a
+  64-byte stack-buffer `write` returned **-1** before the fix and **64** after. Note
+  `stac`/`clac` are built from `pushfq`/`orq`/`popfq` rather than the `STAC`/`CLAC`
+  instructions: those require `CR4.AC=1`, and QEMU 6.2 treats `CR4.AC` as reserved, so
+  writing it `#GP`s and hangs the kernel before the first syscall. Toggling `RFLAGS.AC`
+  directly needs no `CR4.AC` and is what SMEP keys off. **SMEP is now genuinely
+  exercised** under `-cpu max`; QEMU's default `qemu64` does not implement SMEP, which
+  is why the old direct `memcpy` appeared to work.
 - [ ] **CP-5 — QA harness cannot fail.** `tests/qa/run_qa.sh:18-21` greps for four log
   strings (`[COMP]`, `[INPUT] ring overflow`, `[RTFIX]`, `fps=`) that **no code emits**, and
   its `grep -c … && echo FAIL || echo PASS` inverts the result. Every phase gate is

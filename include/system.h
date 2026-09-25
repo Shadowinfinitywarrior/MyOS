@@ -27,6 +27,21 @@ static inline void cli(void) { __asm__ __volatile__("cli"); }
 static inline void sti(void) { __asm__ __volatile__("sti"); }
 static inline void hlt(void) { __asm__ __volatile__("hlt"); }
 
+static inline void stac(void) {
+    uint64_t bits = 1ULL << 18;
+    __asm__ __volatile__("pushfq\n\t"
+                         "orq %0, 8(%%rsp)\n\t"
+                         "popfq"
+                         : : "r"(bits) : "memory", "cc");
+}
+static inline void clac(void) {
+    uint64_t bits = ~(1ULL << 18);
+    __asm__ __volatile__("pushfq\n\t"
+                         "andq %0, 8(%%rsp)\n\t"
+                         "popfq"
+                         : : "r"(bits) : "memory", "cc");
+}
+
 static inline uint64_t read_cr0(void) { uint64_t v; __asm__ __volatile__("mov %%cr0, %0":"=r"(v)); return v; }
 static inline uint64_t read_cr2(void) { uint64_t v; __asm__ __volatile__("mov %%cr2, %0":"=r"(v)); return v; }
 static inline uint64_t read_cr3(void) { uint64_t v; __asm__ __volatile__("mov %%cr3, %0":"=r"(v)); return v; }

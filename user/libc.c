@@ -1,6 +1,4 @@
 #include "libc.h"
-#pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
-#pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
 
 int errno;
 
@@ -52,15 +50,15 @@ int kill(pid_t pid, int sig) {
  * File I/O
  * ========================================== */
 int read(int fd, void *buf, size_t count) {
-    return _syscall(SYS_READ, fd, (int)buf, (int)count, 0, 0);
+    return _syscall(SYS_READ, fd, (long)buf, (long)count, 0, 0);
 }
 
 int write(int fd, const void *buf, size_t count) {
-    return _syscall(SYS_WRITE, fd, (int)buf, (int)count, 0, 0);
+    return _syscall(SYS_WRITE, fd, (long)buf, (long)count, 0, 0);
 }
 
 int open(const char *path, int flags) {
-    return _syscall(SYS_OPEN, (int)path, flags, 0, 0, 0);
+    return _syscall(SYS_OPEN, (long)path, flags, 0, 0, 0);
 }
 
 int close(int fd) {
@@ -71,7 +69,7 @@ int close(int fd) {
  * Misc
  * ========================================== */
 void sleep_ms(unsigned int ms) {
-    _syscall(SYS_SLEEP, (int)ms, 0, 0, 0, 0);
+    _syscall(SYS_SLEEP, (long)ms, 0, 0, 0, 0);
 }
 
 void yield(void) {

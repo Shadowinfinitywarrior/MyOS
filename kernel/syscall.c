@@ -9,8 +9,6 @@
 #include "../drivers/keyboard.h"
 #include "../drivers/rtc.h"
 #include "../fs/vfs.h"
-#pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
-#pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
 
 extern char keyboard_getchar(void);
 
@@ -32,16 +30,44 @@ static int in_user_range(uintptr_t addr, size_t n) {
 }
 
 static int copy_from_user(void *dst, const void *src, size_t n) {
-    if (!dst || !src) return -1;
+    if (!dst) return -1;
+    if (!src && n) return -1;
     if (!in_user_range((uintptr_t)src, n)) return -1;
-    memcpy(dst, src, n);
+    if (n) {
+        stac();
+        memcpy(dst, src, n);
+        clac();
+    }
     return 0;
 }
-static __attribute__((unused)) int copy_to_user(void *dst, const void *src, size_t n) {
-    if (!dst || !src) return -1;
+static int copy_to_user(void *dst, const void *src, size_t n) {
+    if (!dst) return -1;
+    if (!src && n) return -1;
     if (!in_user_range((uintptr_t)dst, n)) return -1;
-    memcpy(dst, src, n);
+    if (n) {
+        stac();
+        memcpy(dst, src, n);
+        clac();
+    }
     return 0;
+}
+
+/* Copy a NUL-terminated user string into a kernel buffer, stopping at the
+ * terminator. Reads byte-at-a-time under stac so a string that ends near a
+ * page boundary cannot fault the kernel by over-reading past the mapping. */
+static int copy_str_from_user(char *dst, size_t dst_size, const char *src) {
+    if (!dst || dst_size == 0) return -1;
+    if ((uintptr_t)src < USER_ADDR_MIN) return -1;
+    size_t i = 0;
+    stac();
+    for (; i < dst_size - 1; i++) {
+        char c = src[i];
+        dst[i] = c;
+        if (c == '\0') { clac(); return 0; }
+    }
+    clac();
+    dst[dst_size - 1] = '\0';
+    return -1;  /* no NUL within capacity */
 }
 
 typedef int32_t (*syscall_fn)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
@@ -75,25 +101,45 @@ static int32_t sys_read(uint64_t fd, uint64_t buf_ptr, uint64_t count,
 
     vfs_node_t *node = proc->fd_table[fd].node;
     if (!node) return -1;
+    if (count == 0) return 0;
+    if (!in_user_range(buf_ptr, count)) return -1;
+
+    uint8_t bounce[256];
+    uint32_t total = 0;
 
     /* Special case: reading from console/keyboard */
     if (node == vfs_resolve_path("/dev/console")) {
-        if (!in_user_range(buf_ptr, count)) return -1;
-        char *buf = (char *)(uintptr_t)buf_ptr;
-        for (uint32_t i = 0; i < count; i++) {
-            buf[i] = keyboard_getchar();
-            if (buf[i] == '\n') {
-                return i + 1;
+        while (total < count) {
+            uint32_t n = (uint32_t)(count - total);
+            if (n > sizeof(bounce)) n = sizeof(bounce);
+            uint32_t got = 0;
+            while (got < n) {
+                uint8_t c = keyboard_getchar();
+                bounce[got++] = c;
+                if (c == '\n') break;
             }
+            if (copy_to_user((void *)(uintptr_t)(buf_ptr + total), bounce, got) != 0)
+                return -1;
+            total += got;
+            if (got < n) break;
         }
-        return count;
+        return (int32_t)total;
     }
 
-    if (!in_user_range(buf_ptr, count)) return -1;
-    int bytes = vfs_read(node, proc->fd_table[fd].offset, count, (void *)(uintptr_t)buf_ptr);
-    if (bytes > 0)
-        proc->fd_table[fd].offset += bytes;
-    return bytes;
+    while (total < count) {
+        uint32_t n = (uint32_t)(count - total);
+        if (n > sizeof(bounce)) n = sizeof(bounce);
+        int bytes = vfs_read(node, proc->fd_table[fd].offset + total, n, bounce);
+        if (bytes < 0) return bytes;
+        if (bytes == 0) break;
+        if (copy_to_user((void *)(uintptr_t)(buf_ptr + total), bounce,
+                         (size_t)bytes) != 0)
+            return -1;
+        total += (uint32_t)bytes;
+        if ((uint32_t)bytes < n) break;
+    }
+    proc->fd_table[fd].offset += total;
+    return (int32_t)total;
 }
 
 static int32_t sys_write(uint64_t fd, uint64_t buf_ptr, uint64_t count,
@@ -103,24 +149,33 @@ static int32_t sys_write(uint64_t fd, uint64_t buf_ptr, uint64_t count,
     if (fd >= MAX_OPEN_FILES || !proc->fd_table[fd].in_use)
         return -1;
 
+    if (count == 0) return 0;
     if (!in_user_range(buf_ptr, count)) return -1;
-    const char *buf = (const char *)(uintptr_t)buf_ptr;
-
-    /* Special case: writing to console */
-    vfs_node_t *console = vfs_resolve_path("/dev/console");
-    if (proc->fd_table[fd].node == console || fd == 1 || fd == 2) {
-        for (uint32_t i = 0; i < count; i++)
-            screen_putchar(buf[i]);
-        return count;
-    }
 
     vfs_node_t *node = proc->fd_table[fd].node;
-    if (!node) return -1;
+    int to_console = (node == vfs_resolve_path("/dev/console")) || fd == 1 || fd == 2;
+    if (!to_console && !node) return -1;
 
-    int bytes = vfs_write(node, proc->fd_table[fd].offset, count, buf);
-    if (bytes > 0)
+    uint8_t bounce[256];
+    uint32_t total = 0;
+    while (total < count) {
+        uint32_t n = (uint32_t)(count - total);
+        if (n > sizeof(bounce)) n = sizeof(bounce);
+        if (copy_from_user(bounce, (const void *)(uintptr_t)(buf_ptr + total), n) != 0)
+            return -1;
+        if (to_console) {
+            for (uint32_t i = 0; i < n; i++) screen_putchar(bounce[i]);
+            total += n;
+            continue;
+        }
+        int bytes = vfs_write(node, proc->fd_table[fd].offset + total, n, bounce);
+        if (bytes < 0) return bytes;
+        if (bytes == 0) break;
         proc->fd_table[fd].offset += bytes;
-    return bytes;
+        total += (uint32_t)bytes;
+        if ((uint32_t)bytes < n) break;
+    }
+    return (int32_t)total;
 }
 
 static int32_t sys_open(uint64_t path_ptr, uint64_t flags, uint64_t a3,
@@ -128,8 +183,8 @@ static int32_t sys_open(uint64_t path_ptr, uint64_t flags, uint64_t a3,
     (void)a3; (void)a4; (void)a5;
     process_t *proc = process_get_current();
     char path_buf[256];
-    if (copy_from_user(path_buf, (const void *)(uintptr_t)path_ptr, 255) != 0) return -1;
-    path_buf[255] = '\0';
+    if (copy_str_from_user(path_buf, sizeof(path_buf),
+                           (const char *)(uintptr_t)path_ptr) != 0) return -1;
     vfs_node_t *node = vfs_resolve_path(path_buf);
     if (!node) return -1;
 
@@ -161,8 +216,10 @@ static int32_t sys_wait(uint64_t pid, uint64_t status_ptr, uint64_t a3,
     (void)a3; (void)a4; (void)a5;
     int status = 0;
     int ret = process_wait((pid_t)pid, status_ptr ? &status : NULL);
-    if (ret > 0 && status_ptr && in_user_range(status_ptr, sizeof(int)))
-        *(int *)(uintptr_t)status_ptr = status;
+    if (ret > 0 && status_ptr) {
+        if (copy_to_user((void *)(uintptr_t)status_ptr, &status, sizeof(status)) != 0)
+            return -1;
+    }
     return ret;
 }
 
@@ -222,8 +279,8 @@ static int32_t sys_execve(uint64_t a1, uint64_t a2, uint64_t a3,
                           uint64_t a4, uint64_t a5) {
     (void)a2; (void)a3; (void)a4; (void)a5;
     char path_buf[256];
-    if (copy_from_user(path_buf, (const void *)(uintptr_t)a1, 255) != 0) return -1;
-    path_buf[255] = '\0';
+    if (copy_str_from_user(path_buf, sizeof(path_buf),
+                           (const char *)(uintptr_t)a1) != 0) return -1;
     const char *path = path_buf;
     vfs_node_t *node = vfs_resolve_path(path);
     if (!node) return -1;
