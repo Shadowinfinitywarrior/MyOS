@@ -250,9 +250,13 @@
 - [x] 6.2 `ip_send` fixed: builds correct IP header with checksum, prepends to payload,
   passes full frame to eth_send.
 - [x] 6.3 ICMP echo handler now transmits replies via ip_send() in icmp_handle_packet().
-- [ ] 6.4 No real UDP socket layer.
-- [ ] 6.5 No TCP state machine (no SYN/SYN-ACK, seq/ack, retransmit, RTT, windowing, FIN).
-  Hardest item in the project.
+- [x] 6.4 UDP socket layer: socket()/bind()/sendto()/recvfrom()/close() with per-port
+  receive queues; port-based demultiplexing in net_poll(); works with virtio-net driver.
+- [~] 6.5 TCP state machine implemented: `tcp.c` now has full 3-way handshake
+  (SYN/SYN-ACK/ACK), state transitions (CLOSED/LISTEN/SYN_SENT/SYN_RECEIVED/
+  ESTABLISHED/FIN_WAIT/CLOSE_WAIT/LAST_ACK/TIME_WAIT/CLOSED), retransmission
+  with exponential backoff, and basic flow control. Remaining: window scaling,
+  selective ACK, retransmission timeout calculation, TIME_WAIT handling.
 - [ ] 6.6 `net/dhcp.c:6` is print-only with hard-coded MAC/address state; `net/dns.c:13`
   is hard-coded. No lease renewal, no real resolver.
 - [x] 6.7 **Acceptance:** met for ICMP ping path. virtio-net driver works, ARP/IP/ICMP
