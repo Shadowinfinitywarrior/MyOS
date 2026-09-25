@@ -34,6 +34,8 @@ extern const uint8_t _binary_build_user_forkdemo_elf_start[];
 extern const uint8_t _binary_build_user_forkdemo_elf_end[];
 extern const uint8_t _binary_build_user_stacktrip_elf_start[];
 extern const uint8_t _binary_build_user_stacktrip_elf_end[];
+extern const uint8_t _binary_build_user_init_elf_start[];
+extern const uint8_t _binary_build_user_init_elf_end[];
 
 /* Phase 2.5 — on-demand user-program launcher. Maps a program name to its
  * embedded ELF binary and spawns it as a fresh user process. The shell `run`
@@ -52,8 +54,11 @@ void run_user_program(const char *name) {
     } else if (strcmp(name, "stacktrip") == 0) {
         start = _binary_build_user_stacktrip_elf_start;
         end = _binary_build_user_stacktrip_elf_end;
+    } else if (strcmp(name, "init") == 0) {
+        start = _binary_build_user_init_elf_start;
+        end = _binary_build_user_init_elf_end;
     } else {
-        kprintf("Unknown program '%s' (try hello, forkdemo, stacktrip)\n",
+        kprintf("Unknown program '%s' (try hello, forkdemo, stacktrip, init)\n",
                 name);
         return;
     }
@@ -174,6 +179,16 @@ void init_phase8(void) {
     screen_init(); // Re-initialize screen to pick up fbcon!
 
     print_splash();
+
+    kprintf("[PHASE8] Calling init_start() to load /sbin/init\n");
+    extern void init_start(void);
+    init_start();
+
+    kprintf("[PHASE8] Spawning embedded init as fallback\n");
+    process_create_user("init",
+                        _binary_build_user_init_elf_start,
+                        (uint64_t)(_binary_build_user_init_elf_end -
+                                   _binary_build_user_init_elf_start));
 
     kprintf("[PHASE8] Spawning user-space 'hello' process\n");
     process_create_user("hello",

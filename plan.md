@@ -43,9 +43,14 @@
   descriptor recycling (the old queue wedged permanently after 16 I/Os); the blk
   request header's `sector` field at offset 8 (it was at offset 4, so **every request
   silently hit sector 0**).
-- [ ] **CP-2 — no userspace entry point.** `kernel/init.c:6-13` `init_start()` (which would
+- [x] **CP-2 — no userspace entry point.** `kernel/init.c:6-13` `init_start()` (which would
   `process_create_user("/sbin/init")`) is **never called** (only its decl in `init.h:4`).
-  The live shell is a kernel thread (`init_phase8.c:180 shell_dummy`).
+  The live shell is a kernel thread (`init_phase8.c:180 shell_dummy`). **Fixed:**
+  `init_phase8.c` now calls `init_start()` after the splash screen; since the ramfs
+  has no `/sbin/init`, a fallback spawns the embedded `user/init.elf` (which prints
+  "MyOS Init", forks, and the child attempts `execve("/bin/shell")`). Both init
+  processes exit cleanly (codes 0). `user/init.c` was also fixed to pass 64-bit
+  pointers to `_syscall` (removed the truncation pragmas).
 - [x] **CP-3 — address spaces are capped at 7.** `kernel/paging.c:18-20` has 8 static
   directory slots with a monotonic `next_idx` (`paging.c:261-265,334-335`) that is **never
   reclaimed**; `kernel/process.c:251-280` frees user frames but not cloned page-table
