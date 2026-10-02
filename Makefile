@@ -9,14 +9,57 @@ USER_CFLAGS = -ffreestanding -fno-builtin -fno-stack-protector -O2 -Wall -Wextra
 LDFLAGS = -T scripts/linker.ld -nostdlib
 ASFLAGS = -f elf64
 
-KERNEL_SRCS = kernel/kernel.c kernel/idt.c kernel/isr.c kernel/irq.c kernel/pic.c kernel/timer.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/process.c kernel/scheduler.c kernel/syscall.c kernel/elf.c kernel/signal.c kernel/apic.c kernel/acpi.c kernel/smp.c kernel/mmap.c kernel/shm.c kernel/pipe.c kernel/select.c kernel/init.c kernel/exec.c kernel/slab.c kernel/module.c kernel/tty.c kernel/pthread.c kernel/mutex.c kernel/rwlock.c kernel/dynlink.c kernel/init_phase8.c kernel/gpt_detect.c kernel/gpt_ext4_mount.c kernel/gpt.c kernel/gdt.c kernel/tss.c kernel/syscall64.c
+KERNEL_SRCS = kernel/kernel.c kernel/idt.c kernel/isr.c kernel/irq.c kernel/pic.c kernel/timer.c kernel/pmm.c kernel/paging.c kernel/heap.c kernel/process.c kernel/scheduler.c kernel/syscall.c kernel/elf.c kernel/signal.c kernel/apic.c kernel/acpi.c kernel/smp.c kernel/mmap.c kernel/shm.c kernel/pipe.c kernel/select.c kernel/init.c kernel/exec.c kernel/slab.c kernel/module.c kernel/tty.c kernel/pthread.c kernel/mutex.c kernel/rwlock.c kernel/dynlink.c kernel/init_phase8.c kernel/gpt_detect.c kernel/gpt_ext4_mount.c kernel/gpt.c kernel/gdt.c kernel/tss.c kernel/syscall64.c kernel/vtty.c
 DRIVER_SRCS = drivers/serial.c drivers/keyboard.c drivers/ata.c drivers/pci.c drivers/rtc.c drivers/screen.c drivers/mouse.c drivers/speaker.c drivers/vga_gfx.c drivers/framebuffer.c drivers/ne2k.c drivers/ahci.c drivers/ac97.c drivers/fbcon.c drivers/virtio.c drivers/virtio_blk.c drivers/virtio_net.c drivers/nvme.c drivers/xhci.c drivers/usb.c drivers/usb_hid.c drivers/fbterm.c drivers/virtio_gpu.c
 FS_SRCS = fs/vfs.c fs/ramfs.c fs/devfs.c fs/fat16.c fs/ext2.c fs/ext4.c fs/procfs.c
 NET_SRCS = net/net.c net/eth.c net/arp.c net/ip.c net/icmp.c net/udp.c net/tcp.c net/socket.c net/dhcp.c net/dns.c
+GUI_SRCS = gui/rect.c gui/blit.c gui/surface.c gui/text.c gui/theme.c gui/input.c gui/cursor.c gui/wm.c gui/desktop.c gui/term.c gui/apps.c gui/desktop_boot.c
 
 BUILD = build
 
 all: $(BUILD)/myos.img
+
+# ---- GUI font baking --------------------------------------------------------
+# The kernel has no font parser, so glyphs are pre-rasterised on the host by
+# tools/mkbake into 1bpp bitmaps plus per-glyph metrics. Regenerate them with
+# `make fonts`; they are checked in, so a normal build does not need the host
+# tool (or DejaVu installed).
+FONT_TTF_DIR ?= /usr/share/fonts/truetype/dejavu
+MKBAKE       := $(BUILD)/mkbake
+FONT_PX      := 15
+FONT_FIRST   := 32
+FONT_LAST    := 126
+
+FONT_HEADERS := gui/fonts/ui.h gui/fonts/mono.h gui/fonts/ubold.h gui/fonts/blocks.h
+
+# Unicode Block Elements, baked as a separate face because they sit far outside
+# the 32..126 ASCII range the other three cover. The terminal picks this face
+# per cell when a codepoint falls in it, which is what lets the MyOS banner in
+# ascii.txt draw itself with U+2588/U+2591.
+FONT_BLOCK_FIRST := 0x2580
+FONT_BLOCK_LAST  := 0x259F
+
+$(MKBAKE): tools/mkbake/main.c tools/mkbake/stb_truetype.h | $(BUILD)
+	$(CC) -O2 -o $@ $< -lm
+
+gui/fonts/ui.h: $(MKBAKE)
+	@mkdir -p $(dir $@)
+	$(MKBAKE) $(FONT_TTF_DIR)/DejaVuSans.ttf $@ UI $(FONT_PX) $(FONT_FIRST) $(FONT_LAST)
+
+gui/fonts/mono.h: $(MKBAKE)
+	@mkdir -p $(dir $@)
+	$(MKBAKE) $(FONT_TTF_DIR)/DejaVuSansMono.ttf $@ MONO $(FONT_PX) $(FONT_FIRST) $(FONT_LAST)
+
+gui/fonts/ubold.h: $(MKBAKE)
+	@mkdir -p $(dir $@)
+	$(MKBAKE) $(FONT_TTF_DIR)/DejaVuSans-Bold.ttf $@ UBOLD $(FONT_PX) $(FONT_FIRST) $(FONT_LAST)
+
+gui/fonts/blocks.h: $(MKBAKE)
+	@mkdir -p $(dir $@)
+	$(MKBAKE) $(FONT_TTF_DIR)/DejaVuSansMono.ttf $@ BLOCKS $(FONT_PX) $(FONT_BLOCK_FIRST) $(FONT_BLOCK_LAST)
+
+# Regenerate every baked font from the TrueType sources.
+fonts: $(FONT_HEADERS)
 
 $(BUILD)/kernel_entry.o: kernel/kernel_entry.asm | $(BUILD)
 	$(AS) $(ASFLAGS) $< -o $@
@@ -42,8 +85,12 @@ $(BUILD)/%.o: user/%.c | $(BUILD)
 $(BUILD)/%.o: lib/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD)/gui/%.o: gui/%.c | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 # ---- User-space programs (built separately, embedded into the kernel) ----
-USER_PROGS = hello forkdemo stacktrip init
+USER_PROGS = hello forkdemo stacktrip init sh
 
 $(BUILD)/user/crt0.o: user/crt0.asm | $(BUILD)
 	@mkdir -p $(dir $@)
@@ -66,6 +113,12 @@ $(BUILD)/user_stacktrip_embed.o: $(BUILD)/user/stacktrip.elf
 	$(LD) -r -b binary $< -o $@
 
 $(BUILD)/user_init_embed.o: $(BUILD)/user/init.elf
+	$(LD) -r -b binary $< -o $@
+
+$(BUILD)/user_sh_embed.o: $(BUILD)/user/sh.elf
+	$(LD) -r -b binary $< -o $@
+
+$(BUILD)/ascii_embed.o: ascii.txt | $(BUILD)
 	$(LD) -r -b binary $< -o $@
 
 $(BUILD)/smp_trampoline_stub.o: kernel/smp_trampoline_stub.c | $(BUILD)
@@ -92,9 +145,11 @@ TERMINAL_OBJS = $(TERMINAL_SRCS:user/%.c=$(BUILD)/%.o)
 FILE_EXPLORER_OBJS = $(FILE_EXPLORER_SRCS:user/%.c=$(BUILD)/%.o)
 SETTINGS_OBJS = $(SETTINGS_SRCS:user/%.c=$(BUILD)/%.o)
 BROWSER_OBJS = $(BROWSER_SRCS:user/%.c=$(BUILD)/%.o)
-ALL_OBJS = $(KERNEL_OBJS) $(DRIVER_OBJS) $(FS_OBJS) $(NET_OBJS) $(LIB_OBJS) $(TERMINAL_OBJS) $(FILE_EXPLORER_OBJS) $(SETTINGS_OBJS) $(BROWSER_OBJS) $(BUILD)/smp_trampoline_stub.o $(BUILD)/context_switch.o $(BUILD)/isr_stubs.o
+GUI_OBJS = $(GUI_SRCS:gui/%.c=$(BUILD)/gui/%.o)
 
-$(BUILD)/kernel.elf: $(BUILD)/kernel_entry.o $(ALL_OBJS) $(BUILD)/user_hello_embed.o $(BUILD)/user_forkdemo_embed.o $(BUILD)/user_stacktrip_embed.o $(BUILD)/user_init_embed.o
+ALL_OBJS = $(KERNEL_OBJS) $(DRIVER_OBJS) $(FS_OBJS) $(NET_OBJS) $(LIB_OBJS) $(GUI_OBJS) $(TERMINAL_OBJS) $(FILE_EXPLORER_OBJS) $(SETTINGS_OBJS) $(BROWSER_OBJS) $(BUILD)/smp_trampoline_stub.o $(BUILD)/context_switch.o $(BUILD)/isr_stubs.o
+
+$(BUILD)/kernel.elf: $(BUILD)/kernel_entry.o $(ALL_OBJS) $(BUILD)/user_hello_embed.o $(BUILD)/user_forkdemo_embed.o $(BUILD)/user_stacktrip_embed.o $(BUILD)/user_init_embed.o $(BUILD)/user_sh_embed.o $(BUILD)/ascii_embed.o
 	$(LD) $(LDFLAGS) -o $@ $^
 
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf
@@ -153,7 +208,13 @@ $(BUILD)/data.img: | $(BUILD)
 VIRTIO_BLK = -drive file=$(BUILD)/data.img,format=raw,if=none,id=vd0 -device virtio-blk-pci,drive=vd0
 
 run: $(BUILD)/myos.img $(BUILD)/data.img
-	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 $(VIRTIO_BLK) -vga std -display gtk,gl=off -no-reboot
+	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 $(VIRTIO_BLK) -vga std -display gtk,gl=off -serial stdio -no-reboot
+
+# Serial console only: -nographic disables the VGA adapter entirely, so the
+# GUI never initialises. Distinct from run-headless below, which still renders
+# the GUI into a hidden display while keeping the log on stdio.
+run-console: $(BUILD)/myos.img $(BUILD)/data.img
+	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0 -device virtio-net-pci,netdev=n0 $(VIRTIO_BLK) -vga std -nographic -serial mon:stdio -no-reboot
 
 run-usb: $(BUILD)/myos.img $(BUILD)/data.img
 	qemu-system-x86_64 -drive file=$<,format=raw,if=ide -m 1G -smp 1 -netdev user,id=n0,hostfwd=tcp::8080-:80 -device virtio-net-pci,netdev=n0 -device qemu-xhci -device usb-kbd -device usb-mouse $(VIRTIO_BLK) -vga std -nographic -no-reboot
@@ -167,4 +228,7 @@ clean:
 qa:
 	@bash tests/qa/run_qa.sh
 
--include $(BUILD)/*.d
+# Pull in the -MMD dependency files. Objects live in subdirectories (gui/, user/,
+# user/term/...), so a plain $(BUILD)/*.d glob would silently miss every one of
+# them and editing a header would not trigger a rebuild.
+-include $(shell find $(BUILD) -name '*.d' 2>/dev/null)

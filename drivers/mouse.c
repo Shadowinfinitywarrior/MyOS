@@ -135,13 +135,19 @@ static int apply_sensitivity(int delta) {
     
     /* Apply sensitivity (1-10, default 5) */
     abs_delta = (abs_delta * mouse_sensitivity) / 5;
-    
-    /* Apply acceleration if enabled */
-    if (mouse_acceleration && abs_delta > 2) {
-        /* Quadratic acceleration for larger movements */
-        abs_delta = abs_delta + ((abs_delta - 2) * (abs_delta - 2)) / 4;
+
+    /* Acceleration exists to make fine positioning easier, so it boosts only
+     * the very smallest movement. Applying it to longer ones is actively
+     * harmful: a single 60px packet became 60 + (58*58)/4 = 901px, which
+     * slammed the pointer into the screen edge. Doubling every packet in the
+     * 2..8 range was wrong too - QEMU splits one long move into many small
+     * packets, so the boost accumulated and the pointer overshot its target by
+     * roughly 10%. Emitting 2 for a 1px step keeps the feature without moving
+     * the goalposts under the pointer. */
+    if (mouse_acceleration && abs_delta == 1) {
+        abs_delta = 2;
     }
-    
+
     return abs_delta * sign;
 }
 
@@ -221,7 +227,6 @@ void mouse_input(uint8_t buttons, int8_t dx, int8_t dy, int8_t scroll) {
 static void mouse_callback(registers_t *regs) {
     (void)regs;
     /* IRQ entry hook for GUI input ring */
-    
 
     uint8_t status = inb(MOUSE_PORT_CMD);
     /* Accept mouse data if either bit 4 (aux output buffer) or bit 5 (mouse data) is set */
@@ -230,13 +235,20 @@ static void mouse_callback(registers_t *regs) {
     }
 
     int8_t data = (int8_t)inb(MOUSE_PORT_DATA);
-    
-    /* If we're awaiting an ACK (0xFA) after a command, consume it and don't treat as packet data */
-    if (mouse_awaiting_ack) {
-        if ((uint8_t)data == MOUSE_ACK) {
-            mouse_awaiting_ack = false;
-            return;
-        }
+
+    /* The i8042 posts its own responses on the same data port, and they can
+     * arrive at any time - including long after the command that provoked
+     * them, when mouse_awaiting_ack has already been cleared. Every one of
+     * these has bit 3 set, so a naive "bit 3 set" sync test happily accepts
+     * them as packet headers and shifts the whole packet stream by one byte
+     * from then on, which shows up as wild garbage pointer motion. Filter the
+     * reserved responses unconditionally instead of relying on the ack flag. */
+    uint8_t raw = (uint8_t)data;
+    if (raw == MOUSE_ACK || raw == MOUSE_ERROR || raw == MOUSE_NACK ||
+        raw == MOUSE_CMD_ENABLE || raw == MOUSE_CMD_DISABLE ||
+        raw == MOUSE_CMD_SET_DEFAULTS) {
+        mouse_awaiting_ack = false;
+        return;
     }
 
     if (mouse_cycle == 0) {
@@ -244,7 +256,7 @@ static void mouse_callback(registers_t *regs) {
         if (!(data & 0x08)) return;
         mouse_bytes[0] = data;
         mouse_cycle = 1;
-        
+
         /* Check if we're expecting 4-byte packets (scroll wheel or 5-button mouse) */
         expecting_4th_byte = mouse.scroll_supported || mouse.five_button;
         return;
@@ -268,6 +280,14 @@ static void mouse_callback(registers_t *regs) {
     }
     
     if (mouse_cycle == 3) {
+        /* In a wheel packet byte 3 only carries a 4-bit wheel delta, so any
+         * value with bits above the low nibble means the stream slipped and we
+         * are looking at the wrong byte. Drop it and resync on the next one
+         * that looks like a header, instead of decoding a corrupted packet. */
+        if (mouse.scroll_supported && !mouse.five_button && (data & 0xF0)) {
+            mouse_cycle = 0;
+            return;
+        }
         mouse_bytes[3] = data;
         mouse_cycle = 0;
     }
@@ -424,6 +444,11 @@ bool mouse_get_event(mouse_event_t *event) {
     *event = mouse_queue[mouse_queue_tail];
     mouse_queue_tail = (mouse_queue_tail + 1) % MOUSE_QUEUE_SIZE;
     return true;
+}
+
+void mouse_get_position(int *x, int *y) {
+    if (x) *x = mouse.x;
+    if (y) *y = mouse.y;
 }
 
 void mouse_set_position(int16_t x, int16_t y) {

@@ -1,1 +1,0 @@
-Help command implemented in kernel/init_phase8.c. The shell now lists available commands when 'help' is typed.

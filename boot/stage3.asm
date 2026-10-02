@@ -14,23 +14,10 @@ start:
     mov sp, 0xA000
     sti
 
-    ; Load kernel using DAP like original boot (to low memory first)
-    mov byte [0x7e00], 16
-    mov byte [0x7e00+1], 0
-    mov word [0x7e00+2], 63
-    mov word [0x7e00+4], 0x0000 ; Offset
-    mov word [0x7e00+6], 0x7000 ; Segment
-    mov dword [0x7e00+8], 66
-    mov dword [0x7e00+12], 0
-    ; Reset disk before read
+    ; Reset the disk controller before the first read.
     mov ah, 0
     mov dl, 0x80
     int 0x13
-    mov dl, 0x80
-    mov si, 0x7e00
-    mov ah, 0x42
-    int 0x13
-    jc hang
 
     ; Setup DAP for 8-sector reads to fill kernel
     mov byte [0x7e20], 16
@@ -38,9 +25,18 @@ start:
     mov word [0x7e20+2], 8
     mov word [0x7e20+4], 0x0000 ; Offset always 0
     mov dword [0x7e20+12], 0
-    mov ax, 0x77E0 ; Starting Segment
-    mov ebx, 129
-    mov ecx, 50    ; 50 loops * 8 sectors = 400 sectors (200 KB)
+    ; Stage from 0x20000 instead of 0x77E0 and widen the window. The old
+    ; values capped the kernel at 400 sectors (200 KB); once the image grew
+    ; past that the tail (banner + embedded user ELFs) was never loaded and
+    ; the boot silently degraded. 0x20000 stays clear of the boot sector
+    ; (0x7C00), stage2/3 (0x8000/0x9000), the DAP (0x7e20) and the E820 map
+    ; (0x5000), and 120*8 sectors = 480 KB keeps the top at 0x98000, still
+    ; clear of the EBDA at 0x9FC00. Keep generous headroom here: this window
+    ; silently truncating the kernel is a nasty failure mode, because the boot
+    ; still succeeds and only the tail of the image is missing.
+    mov ax, 0x2000 ; Starting Segment = 0x2000:0 = 0x20000
+    mov ebx, 66
+    mov ecx, 120   ; 120 loops * 8 sectors = 960 sectors (480 KB)
 .read_loop:
     mov word [0x7e20+6], ax
     mov dword [0x7e20+8], ebx
@@ -208,10 +204,10 @@ long_mode:
     mov ss, ax
     mov rsp, 0x900000
     ; Verify source loaded
-    ; Copy kernel from low memory 0x70000 to 0x100000
-    mov rsi, 0x70000
+    ; Copy kernel from low memory 0x20000 to 0x100000
+    mov rsi, 0x20000
     mov rdi, 0x100000
-    mov rcx, 0x60000
+    mov rcx, 0x78000     ; 480 KB, matching the read loop above
     cld
     rep movsb
     ; Verify first byte copied

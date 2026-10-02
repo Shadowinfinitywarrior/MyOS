@@ -31,6 +31,13 @@ extern int errno;
 #define SYS_YIELD    11
 #define SYS_PUTCHAR  22
 #define SYS_GETCHAR  21
+#define SYS_PS       23
+#define SYS_UPTIME   24
+#define SYS_EXECVE   25
+#define SYS_REBOOT   26
+#define SYS_SHUTDOWN 27
+#define SYS_MEMINFO  28
+#define SYS_READDIR  29
 
 /* Syscall wrapper (SYSCALL instruction, SysV argument slots).
  * Returns -1 and sets errno on negative-errno results. */
@@ -39,9 +46,16 @@ long _syscall(long num, long a1, long a2, long a3, long a4, long a5);
 /* Standard functions */
 void exit(int code);
 pid_t fork(void);
+pid_t exec(const char *path);
 pid_t wait(pid_t pid, int *status);
 int kill(pid_t pid, int sig);
 pid_t getpid(void);
+void ps(void);
+int uptime(void);
+int reboot(void);
+int shutdown(void);
+void meminfo(void);
+int readdir(int fd, int index, char *name_buf);
 int read(int fd, void *buf, size_t count);
 int write(int fd, const void *buf, size_t count);
 int open(const char *path, int flags);
@@ -70,6 +84,8 @@ void puts(const char *s);
 void print_int(int n);
 void print_hex(unsigned int n);
 void printf_simple(const char *fmt, ...);
+int printf(const char *fmt, ...);
+int snprintf(char *str, size_t size, const char *format, ...);
 
 #endif
 

@@ -103,6 +103,10 @@ typedef struct process {
     /* File descriptors */
     file_descriptor_t fd_table[MAX_OPEN_FILES];
 
+    /* Controlling virtual terminal. Console reads/writes for this process go
+     * to this vty, which is either the boot console or a window's terminal. */
+    struct vtty     *vtty;
+
     /* Signals */
     uint32_t         pending_signals;
     uint32_t         signal_mask;

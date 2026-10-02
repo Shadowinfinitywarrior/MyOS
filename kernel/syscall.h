@@ -30,6 +30,10 @@
 #define SYS_PS       23
 #define SYS_UPTIME   24
 #define SYS_EXECVE   25
+#define SYS_REBOOT   26
+#define SYS_SHUTDOWN 27
+#define SYS_MEMINFO  28
+#define SYS_READDIR  29
 
 #define NUM_SYSCALLS 256
 

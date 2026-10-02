@@ -36,6 +36,10 @@ extern const uint8_t _binary_build_user_stacktrip_elf_start[];
 extern const uint8_t _binary_build_user_stacktrip_elf_end[];
 extern const uint8_t _binary_build_user_init_elf_start[];
 extern const uint8_t _binary_build_user_init_elf_end[];
+extern const uint8_t _binary_build_user_sh_elf_start[];
+extern const uint8_t _binary_build_user_sh_elf_end[];
+extern const uint8_t _binary_ascii_txt_start[];
+extern const uint8_t _binary_ascii_txt_end[];
 
 /* Phase 2.5 — on-demand user-program launcher. Maps a program name to its
  * embedded ELF binary and spawns it as a fresh user process. The shell `run`
@@ -57,8 +61,11 @@ void run_user_program(const char *name) {
     } else if (strcmp(name, "init") == 0) {
         start = _binary_build_user_init_elf_start;
         end = _binary_build_user_init_elf_end;
+    } else if (strcmp(name, "sh") == 0) {
+        start = _binary_build_user_sh_elf_start;
+        end = _binary_build_user_sh_elf_end;
     } else {
-        kprintf("Unknown program '%s' (try hello, forkdemo, stacktrip, init)\n",
+        kprintf("Unknown program '%s' (try hello, forkdemo, stacktrip, init, sh)\n",
                 name);
         return;
     }
@@ -66,78 +73,16 @@ void run_user_program(const char *name) {
     process_create_user(name, start, (uint64_t)(end - start));
 }
 
-#define CMD_MAX_LEN 128
-
-void shell_dummy(void) {
-    kprintf("\nWelcome to MyOS (Headless Shell)\n");
-    kprintf("Type 'help' to see available commands.\n\n");
-    kprintf("myos> ");
-
-    char cmd[CMD_MAX_LEN];
-    int cmd_len = 0;
-
-    while (1) {
-        key_event_t event;
-        if (keyboard_get_event(&event)) {
-            if (event.type == KEY_EVENT_DOWN || event.type == KEY_EVENT_REPEAT) {
-                kprintf("[KEY] ascii=%d keycode=%d\n", event.ascii, event.keycode);
-                if (event.ascii >= ' ' && event.ascii <= '~') {
-                    if (cmd_len < CMD_MAX_LEN - 1) {
-                        cmd[cmd_len++] = event.ascii;
-                        kprintf("%c", event.ascii);
-                    }
-                } else if (event.keycode == KEY_BACKSPACE && cmd_len > 0) {
-                    cmd_len--;
-                    kprintf("\b \b");
-                } else if (event.keycode == KEY_ENTER) {
-                    cmd[cmd_len] = '\0';
-                    kprintf("\n");
-
-                    if (cmd_len > 0) {
-                        if (strcmp(cmd, "help") == 0) {
-                            kprintf("Available commands:\n");
-                            kprintf("  help       - Show this message\n");
-                            kprintf("  clear      - Clear the screen\n");
-                            kprintf("  reboot     - Reboot the system\n");
-                            kprintf("  ls         - List directory contents\n");
-                            kprintf("  cat        - Concatenate and display files\n");
-                            kprintf("  ps         - Show process status\n");
-                            kprintf("  shutdown   - Power off the system\n");
-                            kprintf("  kbdrate    - Set keyboard repeat rate\n");
-                            kprintf("  gui_demo   - Launch GUI demonstration\n");
-                            kprintf("  httpd      - Start HTTP server\n");
-                            kprintf("  dhcpclient - Obtain IP via DHCP\n");
-                        } else if (strcmp(cmd, "clear") == 0) {
-                            screen_clear();
-                        } else if (strcmp(cmd, "reboot") == 0) {
-                            outb(0x64, 0xFE);
-                            hlt();
-                        } else if (strcmp(cmd, "run") == 0 ||
-                                   strncmp(cmd, "run ", 4) == 0) {
-                            run_user_program(cmd + 4);
-                        } else {
-                            kprintf("Unknown command: %s\n", cmd);
-                        }
-                    }
-                    cmd_len = 0;
-                    kprintf("myos> ");
-                }
-            }
-        } else {
-            hlt();
-        }
-    }
-}
 
 void print_splash(void) {
     kprintf("\n");
-    kprintf("  ____                _        _   _              \n");
-    kprintf(" |  _ \\ ___  ___| |_ ___| |_ (_) | |_ ___  ___   \n");
-    kprintf(" | |_) / _ \\/ __| __/ __| __| | | __/ _ \\/ __|  \n");
-    kprintf(" |  __/  __/\\__ \\ || (__| |_  | | ||  __/\\__ \\  \n");
-    kprintf(" |_|   \\___||___/\\__\\___|\\__| |_|\\__\\___||___/  \n");
-    kprintf("\n");
-    kprintf(" Welcome to MyOS - a simple hobby operating system\n");
+    /* Print embedded ASCII banner */
+    const uint8_t *ascii_start = _binary_ascii_txt_start;
+    const uint8_t *ascii_end = _binary_ascii_txt_end;
+    size_t ascii_len = ascii_end - ascii_start;
+    for (size_t i = 0; i < ascii_len; i++) {
+        kputchar(ascii_start[i]);
+    }
     kprintf("\n");
 }
 
@@ -184,31 +129,47 @@ void init_phase8(void) {
     extern void init_start(void);
     init_start();
 
+    vfs_node_t *bin_dir = ramfs_create_dir(root, "bin");
+    
+    vfs_node_t *hello_node = ramfs_create_file(bin_dir, "hello");
+    hello_node->length = (uint32_t)(_binary_build_user_hello_elf_end - _binary_build_user_hello_elf_start);
+    ramfs_write(hello_node, 0, hello_node->length, _binary_build_user_hello_elf_start);
+    
+    vfs_node_t *forkdemo_node = ramfs_create_file(bin_dir, "forkdemo");
+    forkdemo_node->length = (uint32_t)(_binary_build_user_forkdemo_elf_end - _binary_build_user_forkdemo_elf_start);
+    ramfs_write(forkdemo_node, 0, forkdemo_node->length, _binary_build_user_forkdemo_elf_start);
+    
+    vfs_node_t *sh_node = ramfs_create_file(bin_dir, "sh");
+    sh_node->length = (uint32_t)(_binary_build_user_sh_elf_end - _binary_build_user_sh_elf_start);
+    ramfs_write(sh_node, 0, sh_node->length, _binary_build_user_sh_elf_start);
+
+    kprintf("[VFS] Populated /bin with hello, forkdemo, sh\n");
+
     kprintf("[PHASE8] Spawning embedded init as fallback\n");
     process_create_user("init",
                         _binary_build_user_init_elf_start,
                         (uint64_t)(_binary_build_user_init_elf_end -
                                    _binary_build_user_init_elf_start));
 
-    kprintf("[PHASE8] Spawning user-space 'hello' process\n");
-    process_create_user("hello",
-                        _binary_build_user_hello_elf_start,
-                        (uint64_t)(_binary_build_user_hello_elf_end -
-                                   _binary_build_user_hello_elf_start));
-
-    kprintf("[PHASE8] Spawning user 'forkdemo' process\n");
-    process_create_user("forkdemo",
-                        _binary_build_user_forkdemo_elf_start,
-                        (uint64_t)(_binary_build_user_forkdemo_elf_end -
-                                   _binary_build_user_forkdemo_elf_start));
+    kprintf("[PHASE8] Spawning user 'sh' process (Interactive CLI)\n");
+    process_create_user("sh",
+                        _binary_build_user_sh_elf_start,
+                        (uint64_t)(_binary_build_user_sh_elf_end -
+                                   _binary_build_user_sh_elf_start));
 
     /* stacktrip (user/stacktrip.c) is a Phase 2.4 QA artifact: its guard-page
      * fault was verified during development but the test binary is NOT
      * auto-spawned at boot. Keep user/stacktrip.c and its build wiring so an
      * interactive launcher can run it on demand. */
 
-    kprintf("[PHASE8] Spawning shell thread\n");
-    process_create_kernel("shell", shell_dummy);
-
     kprintf("[PHASE8] Init complete\n");
+
+    /* Start the graphical session last, so the whole kernel and userspace are
+     * already up when the first window appears. desktop_boot() never returns;
+     * if there is no usable framebuffer it returns immediately and the text
+     * console continues as before. */
+    {
+        extern void desktop_boot(void);
+        desktop_boot();
+    }
 }

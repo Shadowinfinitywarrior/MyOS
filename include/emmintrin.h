@@ -23,4 +23,9 @@ static inline __m128i _mm_set1_epi32(int i) {
     return v;
 }
 
+static inline void _mm_storeu_si128(void *p, __m128i v) {
+    __m128i *dst = p;
+    *dst = v;
+}
+
 #endif

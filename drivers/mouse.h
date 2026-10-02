@@ -44,6 +44,9 @@ bool mouse_get_event(mouse_event_t *event);
 /* Set mouse position (for warping) */
 void mouse_set_position(int16_t x, int16_t y);
 
+/* Read the current pointer position without draining the event queue */
+void mouse_get_position(int *x, int *y);
+
 /* Set mouse sensitivity (1-10, default 5) */
 void mouse_set_sensitivity(uint8_t sensitivity);
 

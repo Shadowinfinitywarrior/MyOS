@@ -1,0 +1,106 @@
+SK
+S
+MyOS starting...
+1
+Kernel loaded at 1MB
+2
+[GDT] 64-bit GDT loaded with 7 entries
+[TSS] Per-CPU TSS initialized (placeholder rsp0)
+mmap_ptr=0x5000 cnt=6
+[PMM] init: 1 region(s), total_pages=64863, free_pages=64863
+[PMM] region 0: start=0x2a1000 pages=64863 end=0x10000000
+[PMM] using fallback region after __kernel_end
+[PMM] reserved boot stack frames: 4
+[HEAP] init base=0x4000000 size=16777216 (fixed)
+[KERNEL] __kernel_end=0x2a0620
+[KERNEL] HEAP_BASE=0x4000000 (fixed)
+[PAGING] active_dir set to 1316C0
+paging_init: start
+paging_init: memset phys
+paging_init: alloc pdpt
+paging_init: alloc pd
+paging_init: loop
+paging_init: alloc pdpt_high
+paging_init: write_cr3
+paging_init: done
+[PAGING] Initialized 4-level tables, PML4=0x002A1000
+paging enabled
+higher-half kernel
+paging enabled
+higher-half kernel
+paging enabled
+[ISR] Initialized
+[PIC] Remapped to vectors 0x20/0x28
+[IDT] Initialized with 256 gates (64-bit)
+[SYSCALL] System call interface initialized (256 calls)
+[CPU] NX=1 SMEP=0 SMAP=0 (deferred)
+[SYSCALL] SYSCALL/SYSRET configured
+[APIC] Local APIC initialized at 0xFEE00000 (ID: 0)
+[TIMER] APIC timer initialized at 1000 Hz (approx)
+[PROC] Process subsystem initialized (PID 0 = idle)
+[PHASE8] Init start
+[DEVFS] Device filesystem initialized
+[DEVFS]   /dev/null, /dev/zero, /dev/random
+[DEVFS]   /dev/console, /dev/rtc, /dev/uptime
+[VFS] Root filesystem initialized with /dev
+[VIRTIO] 0 devices
+[VIRTIO-BLK] no device
+[VIRTIO-NET] no device
+[SOCKET] init
+[KEYBOARD] Enhanced driver initialized with repeat and extended scancode support
+[MOUSE] Initializing PS/2 mouse...
+[MOUSE] Reset ACK: 0xFA
+[MOUSE] Scroll wheel detected (IntelliMouse)
+[MOUSE] Enhanced PS/2 mouse initialized (sensitivity: 5, accel: on)
+[XHCI] no controller found
+[FB] Initialized BGA 1024x768
+[FBCON] 128x96 chars
+[SCREEN] Framebuffer console initialized 1024x768
+
+  ____                _        _   _              
+ |  _ \ ___  ___| |_ ___| |_ (_) | |_ ___  ___   
+ | |_) / _ \/ __| __/ __| __| | | __/ _ \/ __|  
+ |  __/  __/\__ \ || (__| |_  | | ||  __/\__ \  
+ |_|   \___||___/\__\___|\__| |_|\__\___||___/  
+
+ Welcome to MyOS - a simple hobby operating system
+
+[PHASE8] Spawning user-space 'hello' process
+[PROC] Created user process 'hello' (PID 1, entry=0x40000000)
+[PHASE8] Spawning user 'forkdemo' process
+[PROC] Created user process 'forkdemo' (PID 2, entry=0x40000000)
+[PHASE8] Spawning shell thread
+[PROC] kernel stack base=0x2fa000 top=0x309ff8
+[PROC] about to call vfs_resolve_path
+[PROC] vfs_resolve_path returned 0x4009000
+[PROC] Created kernel process 'shell' (PID 3)
+[PHASE8] Init complete
+3
+Desktop init complete
+4
+========================================
+Welcom
+  Hello from User Space!
+5
+fore to MyOS (  This program runs in Ring 3.
+========================================kdemo: parent PID Headless Shell)
+
+2My be PIfoD ire s: fork
+[PROC] fork: 'forkdemo' (PID 2) -> child PID 4
+1
+foSleeping for 1 second...
+rkde  mo: [chipareld] nt PPID ID 42, c,hild my  PIforkD 4() , waretitiurnedng.. 0
+.
+[PROC] Process 'forkdemo' (PID 4) exited with code 7
+Done! Exiting.
+[[PROC] Process 'hello' (PID 1) exited with code 0
+TPyRpOeC ]' hewlapi' t:to  rseeea paevdai lcahbliel dc omPmIaDnd s4. 
+(
+cmoyodse>  7)
+forkdemo: wait() reaped PID 4 with status 7
+forkdemo: wait(-1) with no children -> -1 (errno 10)
+[PROC] Process 'forkdemo' (PID 2) exited with code 0
+[KEY] ascii=113 keycode=20
+q[KEY] ascii=0 keycode=81
+[KEY] ascii=49 keycode=30
+1

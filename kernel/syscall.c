@@ -9,6 +9,7 @@
 #include "../drivers/keyboard.h"
 #include "../drivers/rtc.h"
 #include "../fs/vfs.h"
+#include "vtty.h"
 
 extern char keyboard_getchar(void);
 
@@ -107,15 +108,27 @@ static int32_t sys_read(uint64_t fd, uint64_t buf_ptr, uint64_t count,
     uint8_t bounce[256];
     uint32_t total = 0;
 
-    /* Special case: reading from console/keyboard */
+    /* Console read: pull from the process's virtual terminal. In a graphical
+     * session the GUI feeds that terminal from the focused window's keyboard,
+     * so the same code serves the serial console and a window with no syscall
+     * differences. */
     if (node == vfs_resolve_path("/dev/console")) {
+        vtty_t *v = proc->vtty ? proc->vtty : console_boot();
         while (total < count) {
             uint32_t n = (uint32_t)(count - total);
             if (n > sizeof(bounce)) n = sizeof(bounce);
             uint32_t got = 0;
             while (got < n) {
-                uint8_t c = keyboard_getchar();
-                bounce[got++] = c;
+                char c;
+                if (!v || !vtty_pop_char(v, &c)) {
+                    /* No input yet: let other processes run rather than
+                     * spinning the scheduler in a tight loop. */
+                    process_yield();
+                    continue;
+                }
+                /* Echo so the typed line appears in the terminal. */
+                vtty_putc(v, c);
+                bounce[got++] = (uint8_t)c;
                 if (c == '\n') break;
             }
             if (copy_to_user((void *)(uintptr_t)(buf_ptr + total), bounce, got) != 0)
@@ -156,6 +169,11 @@ static int32_t sys_write(uint64_t fd, uint64_t buf_ptr, uint64_t count,
     int to_console = (node == vfs_resolve_path("/dev/console")) || fd == 1 || fd == 2;
     if (!to_console && !node) return -1;
 
+    /* Console output goes to the process's virtual terminal. The boot terminal
+     * is mirrored to serial by the console writer, so a headless boot still
+     * sees kernel log output while a windowed shell does not pollute it. */
+    vtty_t *cv = proc->vtty ? proc->vtty : console_boot();
+
     uint8_t bounce[256];
     uint32_t total = 0;
     while (total < count) {
@@ -164,7 +182,11 @@ static int32_t sys_write(uint64_t fd, uint64_t buf_ptr, uint64_t count,
         if (copy_from_user(bounce, (const void *)(uintptr_t)(buf_ptr + total), n) != 0)
             return -1;
         if (to_console) {
-            for (uint32_t i = 0; i < n; i++) screen_putchar(bounce[i]);
+            if (cv) {
+                vtty_write(cv, (const char *)bounce, (int)n);
+            } else {
+                for (uint32_t i = 0; i < n; i++) screen_putchar(bounce[i]);
+            }
             total += n;
             continue;
         }
@@ -252,14 +274,28 @@ static int32_t sys_time(uint64_t a1, uint64_t a2, uint64_t a3,
 static int32_t sys_putchar(uint64_t c, uint64_t a2, uint64_t a3,
                            uint64_t a4, uint64_t a5) {
     (void)a2; (void)a3; (void)a4; (void)a5;
-    screen_putchar((char)c);
+    /* Must go to the same destination as sys_write. libc puts() emits the
+     * string with write() and the trailing newline with putchar(), so sending
+     * putchar() to the legacy VGA text console instead of the process's
+     * virtual terminal splits one line across two devices: the text shows up
+     * in the terminal window but its newlines vanish, so every line is
+     * appended to the end of the previous one and multi-line output renders
+     * as one long wrapped run. */
+    process_t *proc = process_get_current();
+    vtty_t *cv = proc ? (proc->vtty ? proc->vtty : console_boot()) : NULL;
+    if (cv) vtty_putc(cv, (char)c);
+    else    screen_putchar((char)c);
     return 0;
 }
 
 static int32_t sys_getchar(uint64_t a1, uint64_t a2, uint64_t a3,
                            uint64_t a4, uint64_t a5) {
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5;
-    return keyboard_getchar();
+    char c = 0;
+    while ((c = keyboard_getchar()) == 0) {
+        process_yield();
+    }
+    return c;
 }
 
 static int32_t sys_ps(uint64_t a1, uint64_t a2, uint64_t a3,

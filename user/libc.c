@@ -34,8 +34,32 @@ pid_t fork(void) {
     return _syscall(SYS_FORK, 0, 0, 0, 0, 0);
 }
 
+pid_t exec(const char *path) {
+    return _syscall(SYS_EXECVE, (long)path, 0, 0, 0, 0);
+}
+
 pid_t getpid(void) {
     return _syscall(SYS_GETPID, 0, 0, 0, 0, 0);
+}
+
+void ps(void) {
+    _syscall(SYS_PS, 0, 0, 0, 0, 0);
+}
+
+int uptime(void) {
+    return _syscall(SYS_UPTIME, 0, 0, 0, 0, 0);
+}
+
+int reboot(void) {
+    return _syscall(SYS_REBOOT, 0, 0, 0, 0, 0);
+}
+
+int shutdown(void) {
+    return _syscall(SYS_SHUTDOWN, 0, 0, 0, 0, 0);
+}
+
+void meminfo(void) {
+    _syscall(SYS_MEMINFO, 0, 0, 0, 0, 0);
 }
 
 pid_t wait(pid_t pid, int *status) {
@@ -291,10 +315,12 @@ void print_hex(unsigned int n) {
 void printf_simple(const char *fmt, ...) {
     __builtin_va_list args;
     __builtin_va_start(args, fmt);
+    int written = 0;
 
     while (*fmt) {
         if (*fmt != '%') {
             putchar(*fmt++);
+            written++;
             continue;
         }
         fmt++;
@@ -308,23 +334,72 @@ void printf_simple(const char *fmt, ...) {
             case 's': {
                 const char *s = __builtin_va_arg(args, const char *);
                 if (!s) s = "(null)";
-                while (*s) putchar(*s++);
+                while (*s) { putchar(*s++); written++; }
                 break;
             }
             case 'c':
                 putchar((char)__builtin_va_arg(args, int));
+                written++;
                 break;
             case '%':
                 putchar('%');
+                written++;
                 break;
             default:
                 putchar('%');
                 putchar(*fmt);
+                written += 2;
                 break;
         }
         fmt++;
     }
 
     __builtin_va_end(args);
+}
+
+int printf(const char *fmt, ...) {
+    __builtin_va_list args;
+    __builtin_va_start(args, fmt);
+    int written = 0;
+
+    while (*fmt) {
+        if (*fmt != '%') {
+            putchar(*fmt++);
+            written++;
+            continue;
+        }
+        fmt++;
+        switch (*fmt) {
+            case 'd':
+                print_int(__builtin_va_arg(args, int));
+                break;
+            case 'x':
+                print_hex(__builtin_va_arg(args, unsigned int));
+                break;
+            case 's': {
+                const char *s = __builtin_va_arg(args, const char *);
+                if (!s) s = "(null)";
+                while (*s) { putchar(*s++); written++; }
+                break;
+            }
+            case 'c':
+                putchar((char)__builtin_va_arg(args, int));
+                written++;
+                break;
+            case '%':
+                putchar('%');
+                written++;
+                break;
+            default:
+                putchar('%');
+                putchar(*fmt);
+                written += 2;
+                break;
+        }
+        fmt++;
+    }
+
+    __builtin_va_end(args);
+    return written;
 }
 
