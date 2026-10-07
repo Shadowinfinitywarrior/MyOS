@@ -19,3 +19,19 @@ const color_t vga_to_rgb[16] = {
     RGB(0x7A, 0xE2, 0xF0),  /* 14 bright cyan   */
     RGB(0xFF, 0xFF, 0xFF)   /* 15 bright white  */
 };
+
+static int g_current_dpi = DPI_DEFAULT;
+
+int theme_get_dpi(void) {
+    return g_current_dpi;
+}
+
+void theme_set_dpi(int dpi) {
+    if (dpi < 72) dpi = 72;
+    if (dpi > 288) dpi = 288;
+    g_current_dpi = dpi;
+}
+
+int theme_scale(int px) {
+    return (px * g_current_dpi + 48) / 96;
+}

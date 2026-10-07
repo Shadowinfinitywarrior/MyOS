@@ -219,6 +219,19 @@ void init_phase8(void) {
     mouse_init();
     usb_init();
 
+    extern void driver_seed_core(void);
+    extern void pci_init(void);
+    extern int ide_init(void);
+    extern int e1000_init(void);
+    extern int hda_init(void);
+    extern int ac97_probe(void);
+    driver_seed_core();
+    pci_init();
+    ide_init();
+    e1000_init();
+    hda_init();
+    ac97_probe();
+
     fb_init();
     screen_init(); // Re-initialize screen to pick up fbcon!
 

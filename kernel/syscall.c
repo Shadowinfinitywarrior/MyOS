@@ -18,6 +18,10 @@
 #include "../gui/desktop.h"
 #include "../gui/login.h"
 #include "../drivers/mouse.h"
+#include "../gui/theme.h"
+#include "../drivers/ac97.h"
+#include "../drivers/driver.h"
+#include "../drivers/pci.h"
 #include "storage.h"
 
 extern char keyboard_getchar(void);
@@ -953,6 +957,18 @@ static int32_t sys_os_control(uint64_t cmd, uint64_t a1, uint64_t a2, uint64_t a
         case OS_CMD_GET_MOUSE: {
             return (int32_t)mouse_get_sensitivity();
         }
+        case OS_CMD_SET_DPI: {
+            theme_set_dpi((int)a1);
+            desktop_invalidate();
+            return 0;
+        }
+        case OS_CMD_GET_DPI: {
+            return theme_get_dpi();
+        }
+        case OS_CMD_PLAY_SOUND: {
+            sound_play_tone((uint32_t)a1, (uint32_t)a2);
+            return 0;
+        }
         case OS_CMD_STORAGE_INFO: {
             storage_device_info_t devs[4];
             int n = storage_get_devices(devs, 4);
@@ -987,6 +1003,41 @@ static int32_t sys_os_control(uint64_t cmd, uint64_t a1, uint64_t a2, uint64_t a
             if (out[0] == '\0') strcpy(out, "No portable devices attached.\n");
             if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
             return 0;
+        }
+        case OS_CMD_DRIVER_LIST: {
+            int n = driver_count();
+            char out[1024] = "";
+            for (int i = 0; i < n; i++) {
+                const myos_driver_info_t *d = driver_get(i);
+                if (d) {
+                    char line[128];
+                    snprintf(line, sizeof(line), "%s (%s, %s): %s\n",
+                             d->name, d->category, d->status, d->description);
+                    if (strlen(out) + strlen(line) < sizeof(out) - 1) {
+                        strcat(out, line);
+                    }
+                }
+            }
+            if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            return n;
+        }
+        case OS_CMD_PCI_LIST: {
+            int n = pci_device_count();
+            char out[1024] = "";
+            for (int i = 0; i < n; i++) {
+                const pci_device_t *d = pci_get_device(i);
+                if (d) {
+                    char line[128];
+                    snprintf(line, sizeof(line), "PCI %02x:%02x.%x  %04x:%04x  Class %02x:%02x  BAR0=0x%08x\n",
+                             d->loc.bus, d->loc.slot, d->loc.func,
+                             d->vendor, d->device, d->class_code, d->subclass, (uint32_t)d->bars[0]);
+                    if (strlen(out) + strlen(line) < sizeof(out) - 1) {
+                        strcat(out, line);
+                    }
+                }
+            }
+            if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            return n;
         }
         default:
             return -1;

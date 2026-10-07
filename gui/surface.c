@@ -145,27 +145,26 @@ void surface_rounded_fill(surface_t *s, const rect_t *r, int radius, color_t c) 
     surface_fill_rect(s, &top, c);
     surface_fill_rect(s, &bot, c);
 
-    int r4 = radius * 4;
-    int r4_sq = r4 * r4;
-    int corners[4][2] = {
-        { r->x + radius, r->y + radius },
-        { r->x + r->w - radius - 1, r->y + radius },
-        { r->x + radius, r->y + r->h - radius - 1 },
-        { r->x + r->w - radius - 1, r->y + r->h - radius - 1 },
-    };
+    int r_sub = radius * 4;
+    int r_sub_sq = r_sub * r_sub;
+
     for (int k = 0; k < 4; k++) {
-        int cx = corners[k][0], cy = corners[k][1];
+        int cx = (k & 1) ? (r->x + r->w - radius) : (r->x + radius);
+        int cy = (k & 2) ? (r->y + r->h - radius) : (r->y + radius);
+
         for (int dy = 0; dy < radius; dy++) {
+            int py = (k & 2) ? (cy + dy) : (cy - 1 - dy);
             for (int dx = 0; dx < radius; dx++) {
-                int px = (k & 1) ? (cx + radius - 1 - dx) : (cx + dx);
-                int py = (k & 2) ? (cy + radius - 1 - dy) : (cy + dy);
-                int sx = (px - cx) * 4;
-                int sy = (py - cy) * 4;
+                int px = (k & 1) ? (cx + dx) : (cx - 1 - dx);
+
+                int sx = dx * 4;
+                int sy = dy * 4;
                 int cov = 0;
-                if ((sx + 1) * (sx + 1) + (sy + 1) * (sy + 1) <= r4_sq) cov++;
-                if ((sx + 3) * (sx + 3) + (sy + 1) * (sy + 1) <= r4_sq) cov++;
-                if ((sx + 1) * (sx + 1) + (sy + 3) * (sy + 3) <= r4_sq) cov++;
-                if ((sx + 3) * (sx + 3) + (sy + 3) * (sy + 3) <= r4_sq) cov++;
+                if ((sx + 1) * (sx + 1) + (sy + 1) * (sy + 1) <= r_sub_sq) cov++;
+                if ((sx + 3) * (sx + 3) + (sy + 1) * (sy + 1) <= r_sub_sq) cov++;
+                if ((sx + 1) * (sx + 1) + (sy + 3) * (sy + 3) <= r_sub_sq) cov++;
+                if ((sx + 3) * (sx + 3) + (sy + 3) * (sy + 3) <= r_sub_sq) cov++;
+
                 if (cov == 4) {
                     surface_pixel(s, px, py, c);
                 } else if (cov > 0) {
@@ -183,37 +182,48 @@ void surface_rounded_outline(surface_t *s, const rect_t *r, int radius, color_t 
     if (radius * 2 > r->w) radius = r->w / 2;
     if (radius * 2 > r->h) radius = r->h / 2;
 
-    /* Top and bottom straight runs between the corner arcs. */
+    /* Top, bottom, left, right straight segments */
     rect_t top = { r->x + radius, r->y, r->w - radius * 2, thickness };
     rect_t bot = { r->x + radius, r->y + r->h - thickness, r->w - radius * 2, thickness };
+    rect_t left = { r->x, r->y + radius, thickness, r->h - radius * 2 };
+    rect_t right = { r->x + r->w - thickness, r->y + radius, thickness, r->h - radius * 2 };
     surface_fill_rect(s, &top, c);
     surface_fill_rect(s, &bot, c);
+    surface_fill_rect(s, &left, c);
+    surface_fill_rect(s, &right, c);
 
-    int ro = radius * radius;
-    int inner = radius - thickness;
-    int ri = inner > 0 ? inner * inner : 0;
+    int r_out_sub = radius * 4;
+    int r_out_sq = r_out_sub * r_out_sub;
+    int r_in = radius - thickness;
+    int r_in_sub = r_in > 0 ? r_in * 4 : 0;
+    int r_in_sq = r_in_sub * r_in_sub;
 
-    for (int q = 0; q < 4; q++) {
-        int sx = (q & 1) ? -1 : 1;      /* outward direction on x */
-        int sy = (q & 2) ? -1 : 1;      /* outward direction on y */
-        int cx = (q & 1) ? (r->x + r->w - radius - 1) : (r->x + radius);
-        int cy = (q & 2) ? (r->y + r->h - radius - 1) : (r->y + radius);
+    for (int k = 0; k < 4; k++) {
+        int cx = (k & 1) ? (r->x + r->w - radius) : (r->x + radius);
+        int cy = (k & 2) ? (r->y + r->h - radius) : (r->y + radius);
+
         for (int dy = 0; dy < radius; dy++) {
+            int py = (k & 2) ? (cy + dy) : (cy - 1 - dy);
             for (int dx = 0; dx < radius; dx++) {
-                int ox = sx * dx, oy = sy * dy;
-                int d2 = ox * ox + oy * oy;
-                if (d2 > ro || d2 < ri) continue;
-                int px = cx + ox, py = cy + oy;
-                for (int t = 0; t < thickness; t++) {
-                    int qx = px - sx * t, qy = py - sy * t;
-                    if (qx >= r->x && qx < r->x + r->w &&
-                        qy >= r->y && qy < r->y + r->h) {
-                        if (d2 >= ro - radius) {
-                            surface_pixel_blend(s, qx, qy, c, 210);
-                        } else {
-                            surface_pixel(s, qx, qy, c);
-                        }
-                    }
+                int px = (k & 1) ? (cx + dx) : (cx - 1 - dx);
+
+                int sx = dx * 4;
+                int sy = dy * 4;
+                int cov = 0;
+                #define SUB_TEST(ox, oy) { \
+                    int d2 = (sx + ox) * (sx + ox) + (sy + oy) * (sy + oy); \
+                    if (d2 <= r_out_sq && d2 >= r_in_sq) cov++; \
+                }
+                SUB_TEST(1, 1);
+                SUB_TEST(3, 1);
+                SUB_TEST(1, 3);
+                SUB_TEST(3, 3);
+                #undef SUB_TEST
+
+                if (cov == 4) {
+                    surface_pixel(s, px, py, c);
+                } else if (cov > 0) {
+                    surface_pixel_blend(s, px, py, c, cov * 64 - 1);
                 }
             }
         }

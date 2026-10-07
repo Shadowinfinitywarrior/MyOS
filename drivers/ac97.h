@@ -9,5 +9,11 @@ void ac97_play(const uint8_t *samples, uint32_t num_samples, uint32_t sample_rat
 void ac97_stop(void);
 void ac97_beep(uint32_t freq, uint32_t duration_ms);
 bool ac97_is_playing(void);
+bool ac97_is_available(void);
+
+/* Unified OS sound synthesis layer (routes to AC'97 / PC Speaker) */
+void sound_play_tone(uint32_t freq, uint32_t duration_ms);
+void sound_play_click(void);
+void sound_play_chime(void);
 
 #endif

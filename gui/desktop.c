@@ -48,12 +48,16 @@ int desktop_workarea_bottom(void) { return workarea_bottom; }
 
 /* ---- app registry -------------------------------------------------------- */
 
-static void launch_terminal(void) { term_open_shell(); }
-static void launch_browser(void)  { app_open_browser(); }
-static void launch_files(void)    { app_open_files(); }
-static void launch_sysinfo(void)  { app_open_sysinfo(); }
-static void launch_help(void)     { app_open_help(); }
-static void launch_about(void)    { app_open_about(); }
+static void launch_terminal(void)   { term_open_shell(); }
+static void launch_browser(void)    { app_open_browser(); }
+static void launch_files(void)      { app_open_files(); }
+static void launch_editor(void)     { app_open_editor(); }
+static void launch_calculator(void) { app_open_calculator(); }
+static void launch_player(void)     { app_open_player(); }
+static void launch_settings(void)   { app_open_settings(); }
+static void launch_sysinfo(void)    { app_open_sysinfo(); }
+static void launch_help(void)       { app_open_help(); }
+static void launch_about(void)      { app_open_about(); }
 
 /* 16x16 1bpp icons, two bytes per row */
 static const uint8_t icon_terminal[32] = {
@@ -73,6 +77,30 @@ static const uint8_t icon_files[32] = {
     0x82, 0x7f, 0x02, 0x40, 0x02, 0x40, 0x02, 0x40,
     0x02, 0x40, 0x02, 0x40, 0x02, 0x40, 0x02, 0x40,
     0x02, 0x40, 0xfe, 0x7f, 0xfc, 0x3f, 0x00, 0x00,
+};
+static const uint8_t icon_editor[32] = {
+    0x00, 0x00, 0x3c, 0x00, 0x7e, 0x00, 0x66, 0x3c,
+    0x66, 0x7e, 0x66, 0x66, 0x66, 0x66, 0x7e, 0x66,
+    0x7e, 0x66, 0x66, 0x7e, 0x66, 0x7e, 0x66, 0x66,
+    0x7e, 0x3c, 0x3c, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+static const uint8_t icon_calculator[32] = {
+    0x00, 0x00, 0xfc, 0x3f, 0xfe, 0x7f, 0x82, 0x41,
+    0xba, 0x5d, 0x82, 0x41, 0xaa, 0x55, 0x82, 0x41,
+    0xaa, 0x55, 0x82, 0x41, 0xaa, 0x55, 0x82, 0x41,
+    0xfe, 0x7f, 0xfc, 0x3f, 0x00, 0x00, 0x00, 0x00,
+};
+static const uint8_t icon_player[32] = {
+    0x00, 0x00, 0x3c, 0x3c, 0x3e, 0x3e, 0x36, 0x36,
+    0x36, 0x36, 0x36, 0x36, 0x36, 0x36, 0x76, 0x36,
+    0xf6, 0x36, 0xe6, 0x76, 0xc6, 0xe6, 0x00, 0xc6,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+static const uint8_t icon_settings[32] = {
+    0x00, 0x00, 0x80, 0x01, 0xe0, 0x07, 0x38, 0x1c,
+    0x3e, 0x7c, 0x4f, 0xf2, 0xc6, 0x63, 0x80, 0x01,
+    0x80, 0x01, 0xc6, 0x63, 0x4f, 0xf2, 0x3e, 0x7c,
+    0x38, 0x1c, 0xe0, 0x07, 0x80, 0x01, 0x00, 0x00,
 };
 static const uint8_t icon_monitor[32] = {
     0x00, 0x00, 0xfc, 0x3f, 0xfe, 0x7f, 0x02, 0x40,
@@ -94,12 +122,16 @@ static const uint8_t icon_about[32] = {
 };
 
 static app_entry_t apps[] = {
-    { "Terminal", "Interactive shell",     launch_terminal, icon_terminal },
-    { "Browser",  "Tor Onion browser",    launch_browser,  icon_browser },
-    { "Files",    "Disk & storage manager", launch_files,   icon_files },
-    { "System",   "Processes & memory",    launch_sysinfo,  icon_monitor },
-    { "Help",     "Shortcuts & guidance", launch_help,     icon_help },
-    { "About",    "MyOS architecture",    launch_about,    icon_about },
+    { "Terminal",   "Interactive shell",          launch_terminal,   icon_terminal },
+    { "Browser",    "Tor Onion browser",         launch_browser,    icon_browser },
+    { "Files",      "Disk & storage manager",     launch_files,      icon_files },
+    { "Editor",     "Text editor & notepad",      launch_editor,     icon_editor },
+    { "Calculator", "Interactive calculator",    launch_calculator, icon_calculator },
+    { "Music",      "Sound studio & player",      launch_player,     icon_player },
+    { "Settings",   "Display, DPI & control",     launch_settings,   icon_settings },
+    { "System",     "Processes & memory",         launch_sysinfo,    icon_monitor },
+    { "Help",       "Shortcuts & guidance",      launch_help,       icon_help },
+    { "About",      "MyOS architecture",         launch_about,      icon_about },
 };
 
 #define APP_COUNT ((int)ARRAY_SIZE(apps))
@@ -136,7 +168,27 @@ bool desktop_launch(const char *name) {
         desktop_invalidate();
         return true;
     }
-    if (strcmp(name, "sysinfo") == 0 || strcmp(name, "settings") == 0) {
+    if (strcmp(name, "calc") == 0 || strcmp(name, "calculator") == 0) {
+        launch_calculator();
+        desktop_invalidate();
+        return true;
+    }
+    if (strcmp(name, "editor") == 0 || strcmp(name, "notepad") == 0 || strcmp(name, "edit") == 0) {
+        launch_editor();
+        desktop_invalidate();
+        return true;
+    }
+    if (strcmp(name, "music") == 0 || strcmp(name, "player") == 0 || strcmp(name, "sound") == 0) {
+        launch_player();
+        desktop_invalidate();
+        return true;
+    }
+    if (strcmp(name, "settings") == 0 || strcmp(name, "control") == 0) {
+        launch_settings();
+        desktop_invalidate();
+        return true;
+    }
+    if (strcmp(name, "sysinfo") == 0 || strcmp(name, "system") == 0) {
         launch_sysinfo();
         desktop_invalidate();
         return true;
@@ -1177,7 +1229,30 @@ void desktop_tick(void) {
                 ((ev.modifiers & KMOD_META) && ev.keycode == KEY_SPACE) ||
                 ev.keycode == KEY_F1) {
                 menu_open = !menu_open;
+                if (menu_open && menu_hot < 0) menu_hot = 0;
                 continue;
+            }
+            if (menu_open) {
+                if (ev.keycode == KEY_DOWN) {
+                    menu_hot = (menu_hot + 1) % APP_COUNT;
+                    continue;
+                }
+                if (ev.keycode == KEY_UP) {
+                    menu_hot = (menu_hot - 1 + APP_COUNT) % APP_COUNT;
+                    continue;
+                }
+                if (ev.keycode == KEY_ENTER) {
+                    if (menu_hot >= 0 && menu_hot < APP_COUNT) {
+                        const char *aname = apps[menu_hot].name;
+                        menu_open = false;
+                        desktop_launch(aname);
+                    }
+                    continue;
+                }
+                if (ev.keycode == KEY_ESCAPE) {
+                    menu_open = false;
+                    continue;
+                }
             }
             if ((ev.modifiers & KMOD_META) && ev.keycode == KEY_D) {
                 wm_minimize_all();
@@ -1186,6 +1261,11 @@ void desktop_tick(void) {
             if ((ev.modifiers & KMOD_ALT) && ev.keycode == KEY_TAB) {
                 if (ev.modifiers & KMOD_SHIFT) wm_cycle_prev();
                 else wm_cycle_next();
+                continue;
+            }
+            if ((ev.modifiers & KMOD_ALT) && ev.keycode == KEY_F4) {
+                wm_window_t *f = wm_focused();
+                if (f) wm_destroy(f);
                 continue;
             }
         }
@@ -1237,8 +1317,15 @@ void desktop_tick(void) {
 }
 
 void desktop_run(void) {
+    uint32_t last_frame_ticks = timer_get_ticks();
     for (;;) {
-        desktop_tick();
+        uint32_t now = timer_get_ticks();
+        if (now - last_frame_ticks >= 16) {
+            last_frame_ticks = now;
+            desktop_tick();
+        } else {
+            input_pump();
+        }
         process_yield();
     }
 }

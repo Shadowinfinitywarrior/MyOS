@@ -74,9 +74,14 @@
 #define OS_CMD_SET_THEME      15
 #define OS_CMD_SET_MOUSE      16
 #define OS_CMD_GET_MOUSE      17
+#define OS_CMD_SET_DPI        18
+#define OS_CMD_GET_DPI        19
 #define OS_CMD_STORAGE_INFO   20
 #define OS_CMD_STORAGE_SYNC   21
 #define OS_CMD_PORTABLE_LIST  22
+#define OS_CMD_PLAY_SOUND     23
+#define OS_CMD_DRIVER_LIST    24
+#define OS_CMD_PCI_LIST       25
 
 /* IPC/MYDP syscalls for cross-language integration */
 #define SYS_IPC_PORT_CREATE       70

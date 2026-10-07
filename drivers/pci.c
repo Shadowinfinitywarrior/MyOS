@@ -74,4 +74,92 @@ int pci_find_device(uint16_t vendor, uint16_t device, pci_dev_info_t *info) {
     return 0;
 }
 
-void pci_init(void) {}
+#define MAX_PCI_DEVICES 64
+static pci_device_t pci_devices[MAX_PCI_DEVICES];
+static int pci_dev_count = 0;
+
+int pci_device_count(void) {
+    return pci_dev_count;
+}
+
+const pci_device_t *pci_get_device(int idx) {
+    if (idx < 0 || idx >= pci_dev_count) return NULL;
+    return &pci_devices[idx];
+}
+
+int pci_find_by_class(uint8_t class_code, uint8_t subclass, pci_device_t *out) {
+    for (int i = 0; i < pci_dev_count; i++) {
+        if (pci_devices[i].class_code == class_code && pci_devices[i].subclass == subclass) {
+            if (out) *out = pci_devices[i];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int pci_enable_bus_master(uint8_t bus, uint8_t slot, uint8_t func) {
+    uint16_t cmd = pci_read_cfg16(bus, slot, func, 0x04);
+    cmd |= (1 << 2) | (1 << 0); /* Bus Master Enable + I/O Space Enable */
+    pci_write_cfg(bus, slot, func, 0x04, (uint32_t)cmd);
+    return 0;
+}
+
+uint32_t pci_get_bar(uint8_t bus, uint8_t slot, uint8_t func, int bar_idx) {
+    if (bar_idx < 0 || bar_idx > 5) return 0;
+    uint32_t raw = pci_read_cfg(bus, slot, func, 0x10 + (bar_idx * 4));
+    if (raw & 1) {
+        return raw & ~0x3; /* I/O Port */
+    } else {
+        return raw & ~0xF; /* MMIO Base */
+    }
+}
+
+void pci_init(void) {
+    pci_dev_count = 0;
+
+    for (int bus = 0; bus < 256; bus++) {
+        for (int slot = 0; slot < 32; slot++) {
+            uint8_t header_type = pci_read_cfg8((uint8_t)bus, (uint8_t)slot, 0, 0x0E);
+            int max_func = (header_type & 0x80) ? 8 : 1;
+
+            for (int func = 0; func < max_func; func++) {
+                uint32_t vd = pci_read_cfg((uint8_t)bus, (uint8_t)slot, (uint8_t)func, 0x00);
+                uint16_t vendor = (uint16_t)(vd & 0xFFFF);
+                uint16_t device = (uint16_t)(vd >> 16);
+
+                if (vendor == 0xFFFF || vendor == 0x0000) {
+                    continue;
+                }
+
+                if (pci_dev_count < MAX_PCI_DEVICES) {
+                    pci_device_t *dev = &pci_devices[pci_dev_count++];
+                    dev->loc.bus = (uint8_t)bus;
+                    dev->loc.slot = (uint8_t)slot;
+                    dev->loc.func = (uint8_t)func;
+                    dev->vendor = vendor;
+                    dev->device = device;
+                    dev->header_type = header_type;
+
+                    uint32_t class_rev = pci_read_cfg((uint8_t)bus, (uint8_t)slot, (uint8_t)func, 0x08);
+                    dev->revision = (uint8_t)(class_rev & 0xFF);
+                    dev->progif = (uint8_t)((class_rev >> 8) & 0xFF);
+                    dev->subclass = (uint8_t)((class_rev >> 16) & 0xFF);
+                    dev->class_code = (uint8_t)((class_rev >> 24) & 0xFF);
+
+                    dev->irq_line = pci_read_cfg8((uint8_t)bus, (uint8_t)slot, (uint8_t)func, 0x3C);
+
+                    for (int b = 0; b < 6; b++) {
+                        uint32_t raw_bar = pci_read_cfg((uint8_t)bus, (uint8_t)slot, (uint8_t)func, 0x10 + b * 4);
+                        if (raw_bar & 1) {
+                            dev->bar_is_io[b] = 1;
+                            dev->bars[b] = raw_bar & ~0x3;
+                        } else {
+                            dev->bar_is_io[b] = 0;
+                            dev->bars[b] = raw_bar & ~0xF;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

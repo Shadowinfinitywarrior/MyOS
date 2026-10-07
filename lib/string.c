@@ -124,35 +124,51 @@ int snprintf(char *str, size_t size, const char *format, ...) {
             continue;
         }
         format++;
+        int zero_pad = 0, width = 0;
+        if (*format == '0') {
+            zero_pad = 1;
+            format++;
+        }
+        while (*format >= '0' && *format <= '9') {
+            width = width * 10 + (*format - '0');
+            format++;
+        }
+        while (*format == 'l' || *format == 'z' || *format == 't') {
+            format++;
+        }
         switch (*format) {
             case 'd': {
                 int n = __builtin_va_arg(args, int);
-                char buf[12];
+                char buf[32];
                 int i = 0, neg = 0;
                 if (n < 0) { neg = 1; n = -n; }
                 if (n == 0) { buf[i++] = '0'; }
-                while (n > 0 && i < 11) { buf[i++] = '0' + (n % 10); n /= 10; }
-                if (neg) buf[i++] = '-';
+                while (n > 0 && i < 30) { buf[i++] = '0' + (n % 10); n /= 10; }
+                while (zero_pad && i < width && i < 30) { buf[i++] = '0'; }
+                if (neg && written < (int)size - 1) str[written++] = '-';
                 while (i > 0 && written < (int)size - 1) str[written++] = buf[--i];
                 break;
             }
             case 'u': {
                 unsigned int n = __builtin_va_arg(args, unsigned int);
-                char buf[12];
+                char buf[32];
                 int i = 0;
                 if (n == 0) { buf[i++] = '0'; }
-                while (n > 0 && i < 11) { buf[i++] = '0' + (n % 10); n /= 10; }
+                while (n > 0 && i < 30) { buf[i++] = '0' + (n % 10); n /= 10; }
+                while (zero_pad && i < width && i < 30) { buf[i++] = '0'; }
                 while (i > 0 && written < (int)size - 1) str[written++] = buf[--i];
                 break;
             }
-            case 'x': {
+            case 'x':
+            case 'X': {
                 unsigned int n = __builtin_va_arg(args, unsigned int);
-                const char *hex = "0123456789abcdef";
-                if (written + 2 < (int)size) {
-                    str[written++] = '0'; str[written++] = 'x';
-                }
-                for (int i = 28; i >= 0 && written < (int)size - 1; i -= 4)
-                    str[written++] = hex[(n >> i) & 0xF];
+                const char *hex = (*format == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+                char buf[32];
+                int i = 0;
+                if (n == 0) { buf[i++] = '0'; }
+                while (n > 0 && i < 30) { buf[i++] = hex[n & 0xF]; n >>= 4; }
+                while (zero_pad && i < width && i < 30) { buf[i++] = '0'; }
+                while (i > 0 && written < (int)size - 1) str[written++] = buf[--i];
                 break;
             }
             case 's': {
@@ -170,12 +186,11 @@ int snprintf(char *str, size_t size, const char *format, ...) {
                 if (written < (int)size - 1) str[written++] = '%';
                 break;
             default:
-                if (written < (int)size - 1) { str[written++] = '%'; str[written++] = *format; }
                 break;
         }
-        format++;
+        if (*format) format++;
     }
-    str[written] = '\0';
+    if (size > 0) str[written] = '\0';
     __builtin_va_end(args);
     return written;
 }

@@ -57,17 +57,23 @@ static void show_help(void) {
     puts("  storage / df               - Display persistent partitions & mounts");
     puts("  sync                       - Flush credentials and system config to disk");
     puts("  portable / usb             - Inspect portable USB/removable drives");
-    puts("");
-    puts("[ Tor Privacy Browser ]");
-    puts("  tor [url]                  - Launch inbuilt Tor Onion Browser");
-    puts("  browser [url]              - Alias for inbuilt privacy browser");
+    puts("  drivers                    - List active kernel hardware drivers");
+    puts("  lspci                      - Scan and list all PCI hardware devices");
+    puts("[ Inbuilt Applications ]");
+    puts("  calc / calculator          - Launch modern arithmetic calculator");
+    puts("  editor / notepad           - Launch persistent multiline text editor");
+    puts("  music / player             - Launch sound studio & synthesizer player");
+    puts("  settings                   - Launch control center & display settings");
+    puts("  tor / browser [url]        - Launch inbuilt Tor Onion Browser");
     puts("");
     puts("[ Window Manager & Desktop Control ]");
     puts("  wm list                    - List active GUI windows (real-time)");
     puts("  wm close <title_or_id>     - Close window in GUI");
     puts("  wm focus <title_or_id>     - Focus and bring window to front");
     puts("  wm tile                    - Auto-tile all windows on desktop");
-    puts("  app <name>                 - Launch GUI app (Terminal, Files, Browser, About, Help, Sysinfo)");
+    puts("  app <name>                 - Launch GUI app (Terminal, Files, Editor, Calculator, Music, Settings)");
+    puts("  dpi [96|120|144]           - Query or set HiDPI desktop scale");
+    puts("  sound / beep [freq] [ms]   - Synthesize sound tone via AC'97 / Speaker");
     puts("  theme <name>               - Switch theme: tokyo, emerald, amber, cyberpunk");
     puts("  mouse [1-10]               - Get or set mouse pointer speed/sensitivity");
     puts("");
@@ -216,6 +222,38 @@ int main(void) {
                 puts("Unknown wm subcommand. Choose: list, close, focus, tile");
             }
 
+        /* ---- Inbuilt Applications ---- */
+        } else if (strcmp(argv[0], "calc") == 0 || strcmp(argv[0], "calculator") == 0) {
+            os_control(OS_CMD_APP_LAUNCH, (long)"Calculator", 0, 0);
+            printf("\x1b[1;32mLaunched Calculator.\x1b[0m\n");
+        } else if (strcmp(argv[0], "editor") == 0 || strcmp(argv[0], "notepad") == 0) {
+            os_control(OS_CMD_APP_LAUNCH, (long)"Editor", 0, 0);
+            printf("\x1b[1;32mLaunched Text Editor.\x1b[0m\n");
+        } else if (strcmp(argv[0], "music") == 0 || strcmp(argv[0], "player") == 0) {
+            os_control(OS_CMD_APP_LAUNCH, (long)"Music", 0, 0);
+            printf("\x1b[1;32mLaunched Sound Studio.\x1b[0m\n");
+        } else if (strcmp(argv[0], "settings") == 0 || strcmp(argv[0], "control") == 0) {
+            os_control(OS_CMD_APP_LAUNCH, (long)"Settings", 0, 0);
+            printf("\x1b[1;32mLaunched Settings & Control Center.\x1b[0m\n");
+        } else if (strcmp(argv[0], "dpi") == 0) {
+            if (argc == 1) {
+                long d = os_control(OS_CMD_GET_DPI, 0, 0, 0);
+                printf("Current desktop scale: %ld DPI (%ld%%)\n", d, (d * 100) / 96);
+            } else {
+                long d = simple_atoi(argv[1]);
+                if (d >= 72 && d <= 288) {
+                    os_control(OS_CMD_SET_DPI, d, 0, 0);
+                    printf("\x1b[1;32mDesktop scaling set to %ld DPI in real time.\x1b[0m\n", d);
+                } else {
+                    puts("\x1b[1;31mInvalid DPI. Choose: 96 (1.0x), 120 (1.25x), 144 (1.5x)\x1b[0m");
+                }
+            }
+        } else if (strcmp(argv[0], "sound") == 0 || strcmp(argv[0], "beep") == 0) {
+            long freq = (argc > 1) ? simple_atoi(argv[1]) : 523;
+            long ms = (argc > 2) ? simple_atoi(argv[2]) : 150;
+            os_control(OS_CMD_PLAY_SOUND, freq, ms, 0);
+            printf("Synthesized %ld Hz tone for %ld ms via audio engine.\n", freq, ms);
+
         /* ---- Tor Inbuilt Privacy Browser ---- */
         } else if (strcmp(argv[0], "tor") == 0 || strcmp(argv[0], "browser") == 0) {
             long res = os_control(OS_CMD_APP_LAUNCH, (long)"Browser", 0, 0);
@@ -238,6 +276,18 @@ int main(void) {
             char out[512] = "";
             os_control(OS_CMD_PORTABLE_LIST, (long)out, sizeof(out), 0);
             puts("=== Portable & Removable Storage Devices ===");
+            printf("%s", out);
+
+        /* ---- Hardware & Driver Registry ---- */
+        } else if (strcmp(argv[0], "drivers") == 0 || strcmp(argv[0], "driver") == 0) {
+            char out[1024] = "";
+            os_control(OS_CMD_DRIVER_LIST, (long)out, sizeof(out), 0);
+            puts("=== Active Kernel Hardware Drivers & Subsystems ===");
+            printf("%s", out);
+        } else if (strcmp(argv[0], "lspci") == 0 || strcmp(argv[0], "pci") == 0) {
+            char out[1024] = "";
+            os_control(OS_CMD_PCI_LIST, (long)out, sizeof(out), 0);
+            puts("=== PCI Bus Device Scan & Registry ===");
             printf("%s", out);
 
         /* ---- App Launcher ---- */

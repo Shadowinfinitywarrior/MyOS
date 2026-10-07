@@ -17,7 +17,7 @@ typedef struct app_entry {
     const uint8_t *icon;   /* 16x16 1bpp, row-stride 2 bytes */
 } app_entry_t;
 
-#define DESKTOP_MAX_ICONS 8
+#define DESKTOP_MAX_ICONS 16
 
 void desktop_init(int w, int h);
 void desktop_shutdown(void);

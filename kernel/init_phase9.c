@@ -25,6 +25,7 @@
 #include "../drivers/hda.h"
 #include "../drivers/gpio.h"
 #include "../drivers/ac97.h"
+#include "../drivers/pci.h"
 #include "../fs/vfs.h"
 #include "../fs/devfs.h"
 #include "../fs/ramfs.h"
@@ -190,6 +191,7 @@ void init_phase9(void) {
      * that the "drivers" shell command prints. PS/2 runs before the keyboard
      * driver because its self-test resets the controller. */
     driver_seed_core();
+    pci_init();
     ps2_init();
     keyboard_init();
     usb_init();

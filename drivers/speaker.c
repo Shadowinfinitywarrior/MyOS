@@ -56,3 +56,14 @@ void speaker_play_note(const char *note, uint32_t duration_ms) {
         speaker_beep(freq, duration_ms);
 }
 
+void speaker_play_click(void) {
+    speaker_beep(880, 8);
+}
+
+void speaker_play_chime(void) {
+    speaker_beep(523, 70);   /* C5 */
+    speaker_beep(659, 70);   /* E5 */
+    speaker_beep(784, 70);   /* G5 */
+    speaker_beep(1046, 120); /* C6 */
+}
+

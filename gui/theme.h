@@ -51,4 +51,13 @@ static inline color_t vga_color_rgb(int idx, bool bright) {
     return vga_to_rgb[(idx & 7) + (bright ? 8 : 0)];
 }
 
+/* DPI & HiDPI scaling configuration */
+#define DPI_DEFAULT 96
+#define DPI_MEDIUM  120
+#define DPI_HIGH    144
+
+int  theme_get_dpi(void);
+void theme_set_dpi(int dpi);
+int  theme_scale(int px);
+
 #endif

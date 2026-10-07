@@ -1,5 +1,6 @@
 #pragma once
-#include <stdint.h>
+#include "../include/system.h"
+#include "../include/types.h"
 
 typedef struct {
     uint16_t base_io;
