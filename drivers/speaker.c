@@ -31,12 +31,28 @@ void speaker_off(void) {
     outb(0x61, tmp);
 }
 
-void speaker_beep(uint32_t frequency, uint32_t duration_ms) {
-    if (frequency < 20 || frequency > 20000) return;
+static volatile uint64_t speaker_off_ms = 0;
+static volatile bool     speaker_active = false;
 
+void speaker_poll(void) {
+    if (speaker_active) {
+        uint64_t now = timer_get_ms64();
+        if (now >= speaker_off_ms) {
+            speaker_off();
+            speaker_active = false;
+        }
+    }
+}
+
+void speaker_beep_async(uint32_t frequency, uint32_t duration_ms) {
+    if (frequency < 20 || frequency > 20000) return;
     speaker_on(frequency);
-    timer_sleep(duration_ms);
-    speaker_off();
+    speaker_off_ms = timer_get_ms64() + duration_ms;
+    speaker_active = true;
+}
+
+void speaker_beep(uint32_t frequency, uint32_t duration_ms) {
+    speaker_beep_async(frequency, duration_ms);
 }
 
 void speaker_play_note(const char *note, uint32_t duration_ms) {
@@ -53,17 +69,14 @@ void speaker_play_note(const char *note, uint32_t duration_ms) {
     if (strcmp(note, "C5") == 0)  freq = 523;
 
     if (freq)
-        speaker_beep(freq, duration_ms);
+        speaker_beep_async(freq, duration_ms);
 }
 
 void speaker_play_click(void) {
-    speaker_beep(880, 8);
+    speaker_beep_async(880, 8);
 }
 
 void speaker_play_chime(void) {
-    speaker_beep(523, 70);   /* C5 */
-    speaker_beep(659, 70);   /* E5 */
-    speaker_beep(784, 70);   /* G5 */
-    speaker_beep(1046, 120); /* C6 */
+    speaker_beep_async(659, 45);
 }
 

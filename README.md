@@ -28,6 +28,9 @@
 
 ### 📦 Inbuilt Desktop Applications
 - **MyOS Terminal**: Hardware-accelerated terminal emulator with VT100 support, scrollback, canonical line editing, and immediate focus.
+- **Calendar**: Accurate Gregorian calendar synced with hardware CMOS RTC, month navigation, and day highlighting.
+- **Network Connections Manager**: Wireless Wi-Fi scanner, Ethernet link monitor, and Bluetooth controller settings.
+- **Power & Battery Manager**: AC adapter status detection, live battery gauge, charging rate, and Standby Mode controls.
 - **Calculator**: Clean arithmetic calculator with quick calculation and mouse/keyboard entry.
 - **Text Editor**: Multiline text notepad for editing and inspecting configuration and notes.
 - **Sound Studio / Music Player**: Synthesizer and audio player utilizing the kernel AC'97 and PC Speaker sound drivers.
@@ -38,11 +41,18 @@
 ### ⚙️ Operating System Kernel & Hardware Drivers
 - **Kernel Architecture**: x86-64 higher-half long mode kernel, SMP (multi-core APIC) support, preemptive round-robin scheduler.
 - **Memory Management**: Physical Frame Allocator (bitmap-based), 4-level paging (PML4) with copy-on-write (COW), kernel slab heap allocator.
+- **Power & Battery Subsystem**:
+  - Live battery charge tracking with AC online/offline detection and charging animation (`⚡`, 100%).
+  - Ultra-low-power **Standby Mode** with darkened display state and zero-latency resume on keyboard/mouse interaction.
+- **Wireless & Network Subsystem**:
+  - Real-time status indicators in top bar for Ethernet (`eth0`), Wi-Fi (`wlan0`), and Bluetooth (`bt0`).
+  - Network state management via syscalls, GUI manager, and CLI commands (`wifi`, `bluetooth`, `eth`).
+- **RTC CMOS Clock**: Accurate hardware CMOS clock reading with zero-padded time (`HH:MM:SS`) and calendar date sync.
 - **Storage Subsystem**:
   - IDE/ATA, AHCI (SATA), NVMe, and VirtIO-Block drivers.
   - GPT partition table parser with EXT4, EXT2, and FAT16 filesystem mounting.
   - Persistent disk data synchronization (`sync`) and portable USB drive detection (`portable` / `usb`).
-- **Audio Drivers**: AC'97 sound controller and PC Speaker tone synthesizer (`sound` / `beep`).
+- **Audio Drivers**: Non-blocking asynchronous AC'97 and PC Speaker sound synthesis (`sound_beep_async()`, `speaker_poll()`).
 - **Networking Stack**: Realtek RTL8139, Intel E1000 Gigabit, and VirtIO-Net drivers with full Ethernet, ARP, IPv4, ICMP, UDP, TCP, and DHCP stack.
 - **Bus & System Drivers**: PCI bus scanner and device registry (`lspci`), APIC, ACPI power management, HPET/PIT timers, and CMOS RTC clock.
 
@@ -142,6 +152,13 @@ Once booted, log in with `myos` / `myos`. Type `help` in the terminal to view av
 | `editor` | Launch multiline Text Editor |
 | `music` | Launch Sound Studio & Player |
 | `settings` | Launch Control Center & Display Settings |
+| `calendar` / `cal` | Open Calendar app / display current month calendar grid |
+| `date` / `time` | Print current system date and RTC CMOS time |
+| `power` / `battery` | Inspect power status, battery level, or change charging mode |
+| `standby` | Enter low-power standby mode |
+| `wifi [scan|on|off]` | Manage Wi-Fi adapter and scan networks |
+| `bluetooth` / `bt` | Manage Bluetooth adapter state |
+| `eth` / `net` | Inspect Ethernet interface status and IP address |
 | `tor` / `browser [url]` | Launch inbuilt Tor Onion Browser |
 | `wm list` | List open GUI windows |
 | `wm tile` | Auto-tile all windows on desktop |

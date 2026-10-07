@@ -317,8 +317,15 @@ GPT partition table detection and mounting (kernel/gpt_detect.c, kernel/gpt_ext4
 **drivers/virtio_net.c**: VirtIO network driver
 
 ### Audio
-**drivers/speaker.c**: PC speaker driver
-**drivers/ac97.c**: AC97 audio driver
+**drivers/speaker.c**: PC speaker driver with non-blocking asynchronous tone generation (`speaker_beep_async()`, `speaker_poll()`)
+**drivers/ac97.c**: AC97 audio driver with non-blocking sample synthesis
+
+### Power & Networking Subsystem
+**kernel/power_net.c**, **kernel/power_net.h**:
+- Battery tracking subsystem (`battery_status_t`) reporting capacity, percentage, voltage, and AC line status
+- Charging mode detection and live indicator animation (`⚡`)
+- Low-power **Standby Mode** with display suspension and instant wake-up on keyboard/mouse input
+- Network controller link manager for Ethernet (`eth0`), Wi-Fi (`wlan0`), and Bluetooth LE (`bt0`)
 
 
 ## 11. GUI Subsystem
@@ -329,10 +336,11 @@ The GUI is an acrylic dark desktop environment featuring subpixel antialiasing, 
 
 Core window management features:
 - Window creation, destruction, focus management (strict click-to-focus to avoid mouse hover focus stealing)
+- Accurate client coordinate tracking (`w->client`) across window movement, maximizing, and resizing
 - Z-ordering (stacking order with active raise)
 - Window dragging, edge resizing, maximizing, minimizing
 - Title bars with close/min/max acrylic buttons
-- Ambient drop shadows beneath windows (`WM_SHADOW_PAD`)
+- Ultra-fast 4px edge ambient drop shadows beneath windows (`WM_SHADOW_PAD`) with zero-stall rendering
 - Event handling and routing (mouse and keyboard)
 - Hit-testing for borders, buttons, and client areas
 - Damage tracking for dirty regions (`surface_present`, `fb_add_damage`)
@@ -341,7 +349,9 @@ Core window management features:
 
 Desktop environment and compositing pipeline:
 - Procedural gradient wallpaper with high-precision subpixel blending
-- Top status bar with OS brand logo, active window title, network/battery indicators, live clock, and user badge
+- Top status bar with OS brand logo, active window title, Ethernet/Wi-Fi/Bluetooth indicators, battery gauge with charging icon, live RTC CMOS clock (`HH:MM:SS`), and user badge
+- Low-power Standby display veil with automatic wake-up on mouse movement or keyboard stroke
+- Interactive status bar icon clicks: opening Calendar, Network Connections, and Power Manager
 - Quick-launch left navigation bar and bottom app dock with hover animations
 - Start menu with categorized app launcher and keyboard arrow navigation
 - Multi-language frame rendering (invoking Rust GUI window composition via `rust_gui_render_frame()`)
@@ -361,9 +371,12 @@ Multi-user authentication and lockscreen subsystem:
 
 Built-in graphical applications:
 - **MyOS Terminal** (`gui/term.c`): Hardware-accelerated terminal emulator with VT100 support, scrollback, canonical line editing, and immediate focus
+- **Calendar** (`app_open_calendar()`): Full Gregorian calendar with monthly grid, today highlight, month navigation (`<`, `>`), and live RTC sync
+- **Network Connections** (`app_open_network()`): Network management center for Ethernet link, Wi-Fi scanning/connections, and Bluetooth state
+- **Power & Battery Manager** (`app_open_power()`): Battery status gauge, charging mode selector, AC adapter toggle, and one-click Standby trigger
 - **Calculator** (`app_open_calc()`): Clean arithmetic calculator with quick calculation and mouse/keyboard entry
 - **Text Editor** (`app_open_editor()`): Multiline text notepad for editing and inspecting configuration and notes
-- **Sound Studio / Music Player** (`app_open_music()`): Synthesizer and audio player utilizing the kernel AC'97 and PC Speaker sound drivers
+- **Sound Studio / Music Player** (`app_open_music()`): Synthesizer and audio player utilizing the non-blocking AC'97 and PC Speaker sound drivers
 - **Settings & Control Center** (`app_open_settings()`): System overview, theme switcher, DPI scaler, and mouse sensitivity tuning
 - **Tor Onion Browser** (`gui/browser.c`): Inbuilt privacy-focused browser with onion routing emulation and web page rendering
 - **File Explorer** (`app_open_files()`): Browse filesystem (ramfs, devfs, ext4), navigate directories, and view files

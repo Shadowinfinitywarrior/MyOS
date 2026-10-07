@@ -5,6 +5,8 @@
 
 void speaker_init(void);
 void speaker_beep(uint32_t frequency, uint32_t duration_ms);
+void speaker_beep_async(uint32_t frequency, uint32_t duration_ms);
+void speaker_poll(void);
 void speaker_play_note(const char *note, uint32_t duration_ms);
 void speaker_play_chime(void);
 void speaker_play_click(void);

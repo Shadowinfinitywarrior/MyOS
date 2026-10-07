@@ -18,6 +18,8 @@
 #include "../drivers/framebuffer.h"
 #include "../drivers/rtc.h"
 #include "../drivers/keyboard.h"
+#include "../drivers/speaker.h"
+#include "../kernel/power_net.h"
 #include "../include/rust_gui.h"
 
 /* ---- layout & geometry -------------------------------------------------- */
@@ -43,6 +45,9 @@ static int         lnav_hot = -1;
 static bool        wallpaper_done;
 static uint32_t    last_clock_s;
 static char        clock_buf[32];
+static int         hit_clock_x0 = 0, hit_clock_x1 = 0;
+static int         hit_batt_x0 = 0, hit_batt_x1 = 0;
+static int         hit_net_x0 = 0, hit_net_x1 = 0;
 
 int desktop_workarea_bottom(void) { return workarea_bottom; }
 
@@ -190,6 +195,21 @@ bool desktop_launch(const char *name) {
     }
     if (strcmp(name, "sysinfo") == 0 || strcmp(name, "system") == 0) {
         launch_sysinfo();
+        desktop_invalidate();
+        return true;
+    }
+    if (strcmp(name, "calendar") == 0 || strcmp(name, "Calendar") == 0 || strcmp(name, "cal") == 0) {
+        app_open_calendar();
+        desktop_invalidate();
+        return true;
+    }
+    if (strcmp(name, "network") == 0 || strcmp(name, "Network") == 0 || strcmp(name, "net") == 0 || strcmp(name, "wifi") == 0) {
+        app_open_network();
+        desktop_invalidate();
+        return true;
+    }
+    if (strcmp(name, "power") == 0 || strcmp(name, "Power") == 0 || strcmp(name, "battery") == 0) {
+        app_open_power();
         desktop_invalidate();
         return true;
     }
@@ -553,14 +573,10 @@ static void draw_text_bb(uint32_t *bb, int stride, const baked_font_t *f,
 void desktop_format_clock(char *buf, int len, bool with_seconds) {
     datetime_t t;
     rtc_get_time(&t);
-    ui_strcpy(buf, len, "");
-    ui_cat_num(buf, len, t.hour, ":");
-    if (t.minute < 10) ui_cat(buf, len, "0");
-    ui_cat_num(buf, len, t.minute, "");
     if (with_seconds) {
-        ui_cat(buf, len, ":");
-        if (t.second < 10) ui_cat(buf, len, "0");
-        ui_cat_num(buf, len, t.second, "");
+        snprintf(buf, len, "%02u:%02u:%02u", t.hour, t.minute, t.second);
+    } else {
+        snprintf(buf, len, "%02u:%02u", t.hour, t.minute);
     }
 }
 
@@ -689,23 +705,58 @@ static void draw_top_bar(uint32_t *bb, int stride) {
     draw_round_outline(bb, stride, &ucard, 4, RGB(45, 65, 95), 1, 230);
     draw_text_bb(bb, stride, font_bold(), cur_rx + 5, 6, ubadge, RGB(120, 175, 255));
 
-    /* Digital Clock */
-    if (last_clock_s == 0) desktop_format_clock(clock_buf, sizeof(clock_buf), false);
+    power_state_t pwr;
+    power_get_state(&pwr);
+    net_state_t net;
+    net_get_state(&net);
+
+    /* Digital Clock (HH:MM:SS) */
+    if (last_clock_s == 0) desktop_format_clock(clock_buf, sizeof(clock_buf), true);
     int cw = text_width(font_mono(), clock_buf);
-    cur_rx -= (cw + 16);
+    cur_rx -= (cw + 14);
+    hit_clock_x1 = cur_rx + cw + 10;
+    hit_clock_x0 = cur_rx - 4;
     draw_text_bb(bb, stride, font_mono(), cur_rx, 6, clock_buf, RGB(235, 245, 255));
 
-    /* Battery Icon (98% green pill) */
-    cur_rx -= 34;
-    rect_t batt_body = { cur_rx, 7, 20, 11 };
-    draw_round_outline(bb, stride, &batt_body, 3, RGB(120, 140, 170), 1, 255);
-    rect_t batt_fill = { cur_rx + 2, 9, 15, 7 };
-    draw_round_rect(bb, stride, &batt_fill, 1, RGB(46, 200, 105), 255);
-    rect_t batt_nub = { cur_rx + 20, 10, 2, 5 };
-    draw_round_rect(bb, stride, &batt_nub, 1, RGB(120, 140, 170), 255);
+    /* Battery Icon & Percentage */
+    char btext[16];
+    snprintf(btext, sizeof(btext), "%u%%", pwr.battery_percent);
+    int btw = text_width(font_ui(), btext);
+    cur_rx -= (btw + 28);
+    hit_batt_x1 = hit_clock_x0;
+    hit_batt_x0 = cur_rx - 4;
+
+    /* Battery Text */
+    draw_text_bb(bb, stride, font_ui(), cur_rx, 6, btext, pwr.is_charging ? RGB(70, 225, 130) : RGB(200, 215, 235));
+
+    /* Battery Graphic Body */
+    int bg_x = cur_rx + btw + 4;
+    rect_t batt_body = { bg_x, 8, 18, 10 };
+    draw_round_outline(bb, stride, &batt_body, 3, RGB(130, 150, 180), 1, 255);
+    int fill_w = (14 * (int)pwr.battery_percent) / 100;
+    if (fill_w < 2) fill_w = 2;
+    rect_t batt_fill = { bg_x + 2, 10, fill_w, 6 };
+    color_t bcolor = pwr.is_charging ? RGB(46, 220, 110)
+                   : (pwr.battery_percent > 35 ? RGB(46, 200, 105) : (pwr.battery_percent > 15 ? RGB(235, 175, 40) : RGB(235, 60, 60)));
+    draw_round_rect(bb, stride, &batt_fill, 1, bcolor, 255);
+    rect_t batt_nub = { bg_x + 18, 11, 2, 4 };
+    draw_round_rect(bb, stride, &batt_nub, 1, RGB(130, 150, 180), 255);
+
+    /* If Charging, draw yellow lightning bolt symbol inside/above battery */
+    if (pwr.is_charging) {
+        color_t bolt_col = RGB(255, 220, 50);
+        px(bb, stride, bg_x + 8, 8, bolt_col);
+        px(bb, stride, bg_x + 7, 9, bolt_col);
+        px(bb, stride, bg_x + 8, 10, bolt_col);
+        px(bb, stride, bg_x + 9, 10, bolt_col);
+        px(bb, stride, bg_x + 10, 10, bolt_col);
+        px(bb, stride, bg_x + 8, 11, bolt_col);
+        px(bb, stride, bg_x + 7, 12, bolt_col);
+        px(bb, stride, bg_x + 8, 13, bolt_col);
+    }
 
     /* Volume Speaker Icon */
-    cur_rx -= 22;
+    cur_rx -= 20;
     int spk_x = cur_rx, spk_y = 7;
     rect_t spk_box = { spk_x, spk_y + 3, 4, 6 };
     draw_rect_aa(bb, stride, &spk_box, RGB(210, 225, 245), 255);
@@ -718,18 +769,50 @@ static void draw_top_bar(uint32_t *bb, int stride) {
     px(bb, stride, spk_x + 12, spk_y + 6, RGB(210, 225, 245));
     px(bb, stride, spk_x + 11, spk_y + 7, RGB(210, 225, 245));
 
+    /* Bluetooth Icon */
+    cur_rx -= 18;
+    int bt_x = cur_rx + 4, bt_y = 8;
+    color_t bt_col = net.bt_enabled ? RGB(75, 165, 255) : RGB(85, 100, 125);
+    for (int y = 0; y < 11; y++) px(bb, stride, bt_x + 4, bt_y + y, bt_col);
+    px(bb, stride, bt_x + 5, bt_y + 1, bt_col);
+    px(bb, stride, bt_x + 6, bt_y + 2, bt_col);
+    px(bb, stride, bt_x + 7, bt_y + 3, bt_col);
+    px(bb, stride, bt_x + 6, bt_y + 4, bt_col);
+    px(bb, stride, bt_x + 5, bt_y + 5, bt_col);
+    px(bb, stride, bt_x + 6, bt_y + 6, bt_col);
+    px(bb, stride, bt_x + 7, bt_y + 7, bt_col);
+    px(bb, stride, bt_x + 6, bt_y + 8, bt_col);
+    px(bb, stride, bt_x + 5, bt_y + 9, bt_col);
+    px(bb, stride, bt_x + 3, bt_y + 2, bt_col);
+    px(bb, stride, bt_x + 2, bt_y + 1, bt_col);
+    px(bb, stride, bt_x + 3, bt_y + 8, bt_col);
+    px(bb, stride, bt_x + 2, bt_y + 9, bt_col);
+
     /* Wi-Fi Signal Arcs */
     cur_rx -= 20;
-    int w_cx = cur_rx + 7, w_cy = 17;
-    px(bb, stride, w_cx, w_cy, RGB(55, 215, 150));
+    int w_cx = cur_rx + 8, w_cy = 17;
+    color_t wifi_col = (net.wifi_enabled && net.wifi_connected) ? RGB(55, 215, 150) : RGB(85, 100, 125);
+    px(bb, stride, w_cx, w_cy, wifi_col);
     for (int dx = -3; dx <= 3; dx++) {
-        if (dx == -3 || dx == 3) px(bb, stride, w_cx + dx, w_cy - 3, RGB(55, 215, 150));
-        else if (dx >= -2 && dx <= 2) px(bb, stride, w_cx + dx, w_cy - 4, RGB(55, 215, 150));
+        if (dx == -3 || dx == 3) px(bb, stride, w_cx + dx, w_cy - 3, wifi_col);
+        else if (dx >= -2 && dx <= 2) px(bb, stride, w_cx + dx, w_cy - 4, wifi_col);
     }
     for (int dx = -6; dx <= 6; dx++) {
-        if (dx == -6 || dx == 6) px(bb, stride, w_cx + dx, w_cy - 6, RGB(55, 215, 150));
-        else if (dx >= -4 && dx <= 4) px(bb, stride, w_cx + dx, w_cy - 8, RGB(55, 215, 150));
+        if (dx == -6 || dx == 6) px(bb, stride, w_cx + dx, w_cy - 6, wifi_col);
+        else if (dx >= -4 && dx <= 4) px(bb, stride, w_cx + dx, w_cy - 8, wifi_col);
     }
+
+    /* Ethernet LAN Icon */
+    cur_rx -= 20;
+    hit_net_x1 = bt_x + 12;
+    hit_net_x0 = cur_rx - 4;
+    int eth_x = cur_rx + 2, eth_y = 8;
+    color_t eth_col = net.eth_connected ? RGB(50, 215, 130) : RGB(85, 100, 125);
+    rect_t eth_box = { eth_x, eth_y, 11, 8 };
+    draw_round_outline(bb, stride, &eth_box, 2, eth_col, 1, 255);
+    px(bb, stride, eth_x + 5, eth_y + 8, eth_col);
+    for (int k = 2; k <= 8; k++) px(bb, stride, eth_x + k, eth_y + 9, eth_col);
+    if (net.eth_connected) px(bb, stride, eth_x + 5, eth_y + 4, RGB(80, 255, 160));
 }
 
 /* ---- Left Vertical Navigation Strip ------------------------------------- */
@@ -1114,9 +1197,19 @@ static bool desktop_click(int x, int y) {
             login_lock();
             return true;
         }
-        /* Clock click opens Sysinfo */
-        if (x >= scr_w - 180 && x < scr_w - 70) {
-            launch_sysinfo();
+        /* Clock click opens Calendar */
+        if (x >= hit_clock_x0 && x < hit_clock_x1) {
+            app_open_calendar();
+            return true;
+        }
+        /* Battery click opens Power & Battery Manager */
+        if (x >= hit_batt_x0 && x < hit_batt_x1) {
+            app_open_power();
+            return true;
+        }
+        /* Network click (WiFi, BT, Ethernet) opens Network Connections */
+        if (x >= hit_net_x0 && x < hit_net_x1) {
+            app_open_network();
             return true;
         }
         return true;
@@ -1274,8 +1367,16 @@ void desktop_tick(void) {
                 wm_alt_tab_end();
             }
         }
+        power_state_t pwr_check;
+        power_get_state(&pwr_check);
+        if (pwr_check.is_standby) {
+            power_set_standby(false);
+            fb_add_damage(0, 0, scr_w, scr_h);
+        }
         wm_handle_event(&ev);
     }
+
+    speaker_poll();
 
     if (term_service_ptr) term_service_ptr();
 
@@ -1283,8 +1384,8 @@ void desktop_tick(void) {
     uint32_t secs = timer_get_seconds();
     if (secs != last_clock_s) {
         last_clock_s = secs;
-        desktop_format_clock(clock_buf, sizeof(clock_buf), false);
-        fb_add_damage(scr_w - 200, 0, 200, topbar_h);
+        desktop_format_clock(clock_buf, sizeof(clock_buf), true);
+        fb_add_damage(scr_w - 240, 0, 240, topbar_h);
     }
 
     uint32_t *bb = fb_get_backbuffer();
@@ -1329,6 +1430,21 @@ void desktop_tick(void) {
 
     if (wm_capture_active()) {
         fb_add_damage(0, 0, scr_w, scr_h);
+    }
+
+    /* Standby Mode display veil */
+    power_state_t pwr_draw;
+    power_get_state(&pwr_draw);
+    if (pwr_draw.is_standby) {
+        rect_t full = { 0, 0, scr_w, scr_h };
+        draw_rect_aa(bb, stride, &full, RGB(0, 0, 0), 220);
+        rect_t card = { (scr_w - 380) / 2, (scr_h - 160) / 2, 380, 160 };
+        draw_round_rect(bb, stride, &card, 16, RGB(16, 22, 34), 245);
+        draw_round_outline(bb, stride, &card, 16, RGB(70, 110, 175), 2, 255);
+        draw_text_bb(bb, stride, font_bold(), card.x + 40, card.y + 26, "STANDBY MODE (LOW POWER)", RGB(120, 190, 255));
+        draw_text_bb(bb, stride, font_ui(), card.x + 36, card.y + 60, "System suspended in energy-saving sleep state.", RGB(200, 220, 245));
+        draw_text_bb(bb, stride, font_bold(), card.x + 42, card.y + 96, "Press any key or move mouse to resume", RGB(80, 225, 150));
+        fb_add_damage(card.x - 4, card.y - 4, card.w + 8, card.h + 8);
     }
 
     cursor_draw();

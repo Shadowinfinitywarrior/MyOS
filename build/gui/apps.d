@@ -11,7 +11,8 @@ build/gui/apps.o: gui/apps.c gui/apps.h gui/wm.h gui/surface.h gui/blit.h \
  gui/../drivers/speaker.h gui/../drivers/ac97.h gui/../drivers/mouse.h \
  gui/../drivers/ata.h gui/../kernel/storage.h gui/../fs/ramfs.h \
  gui/../fs/vfs.h gui/../drivers/virtio_blk.h gui/../drivers/driver.h \
- gui/../drivers/../include/myosinfo.h gui/desktop.h
+ gui/../drivers/../include/myosinfo.h gui/../kernel/power_net.h \
+ gui/desktop.h
 gui/apps.h:
 gui/wm.h:
 gui/surface.h:
@@ -52,4 +53,5 @@ gui/../fs/vfs.h:
 gui/../drivers/virtio_blk.h:
 gui/../drivers/driver.h:
 gui/../drivers/../include/myosinfo.h:
+gui/../kernel/power_net.h:
 gui/desktop.h:

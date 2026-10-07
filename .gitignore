@@ -1,3 +1,6 @@
 gui/rust/target/
 *.pyc
 __pycache__/
+build/user/*.o
+build/mkbake
+build/data.img

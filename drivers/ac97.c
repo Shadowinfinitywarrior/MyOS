@@ -116,17 +116,14 @@ void ac97_beep(uint32_t freq, uint32_t duration_ms) {
 void sound_play_tone(uint32_t freq, uint32_t duration_ms) {
     if (freq == 0 || duration_ms == 0) return;
     playing = true;
-    speaker_beep(freq, duration_ms);
+    speaker_beep_async(freq, duration_ms);
     playing = false;
 }
 
 void sound_play_click(void) {
-    speaker_beep(880, 8);
+    speaker_play_click();
 }
 
 void sound_play_chime(void) {
-    speaker_beep(523, 70);  /* C5 */
-    speaker_beep(659, 70);  /* E5 */
-    speaker_beep(784, 70);  /* G5 */
-    speaker_beep(1046, 120); /* C6 */
+    speaker_play_chime();
 }

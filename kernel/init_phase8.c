@@ -225,12 +225,14 @@ void init_phase8(void) {
     extern int e1000_init(void);
     extern int hda_init(void);
     extern int ac97_probe(void);
+    extern void power_net_init(void);
     driver_seed_core();
     pci_init();
     ide_init();
     e1000_init();
     hda_init();
     ac97_probe();
+    power_net_init();
 
     fb_init();
     screen_init(); // Re-initialize screen to pick up fbcon!

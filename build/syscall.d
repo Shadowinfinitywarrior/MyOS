@@ -18,7 +18,7 @@ build/syscall.o: kernel/syscall.c kernel/syscall.h \
  kernel/../gui/wm.h kernel/../gui/login.h kernel/../drivers/mouse.h \
  kernel/../gui/theme.h kernel/../drivers/ac97.h \
  kernel/../drivers/driver.h kernel/../drivers/../include/myosinfo.h \
- kernel/../drivers/pci.h kernel/storage.h
+ kernel/../drivers/pci.h kernel/storage.h kernel/power_net.h
 kernel/syscall.h:
 kernel/../include/types.h:
 kernel/../include/system.h:
@@ -66,3 +66,4 @@ kernel/../drivers/driver.h:
 kernel/../drivers/../include/myosinfo.h:
 kernel/../drivers/pci.h:
 kernel/storage.h:
+kernel/power_net.h:

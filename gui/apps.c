@@ -21,6 +21,7 @@
 #include "../fs/ramfs.h"
 #include "../drivers/virtio_blk.h"
 #include "../drivers/driver.h"
+#include "../kernel/power_net.h"
 #include "desktop.h"
 
 /* ---- shared chrome ------------------------------------------------------ */
@@ -113,10 +114,12 @@ static void files_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 static bool files_event(wm_window_t *w, const gui_event_t *e) {
     files_state_t *st = (files_state_t *)w->user;
     if (!st) return false;
+    rect_t c;
+    wm_client_screen_rect(w, &c);
 
     if (e->type == EV_MOUSE_DOWN) {
         /* The parent-directory row sits on the path bar's left arrow. */
-        if (e->y < w->client.y + 30 && e->x < w->client.x + 70) {
+        if (e->y < c.y + 30 && e->x < c.x + 70) {
             /* Strip the last component. */
             int n = (int)strlen(st->path);
             while (n > 1 && st->path[n - 1] != '/') n--;
@@ -127,8 +130,8 @@ static bool files_event(wm_window_t *w, const gui_event_t *e) {
             wm_invalidate(w);
             return true;
         }
-        if (e->y >= w->client.y + 42 && e->y < w->client.y + w->client.h) {
-            int row = (e->y - (w->client.y + 42)) / 20;
+        if (e->y >= c.y + 42 && e->y < c.y + c.h) {
+            int row = (e->y - (c.y + 42)) / 20;
             int idx = 0;
             if (st->node && st->node->readdir) {
                 vfs_node_t *child = st->node->readdir(st->node, (uint32_t)row);
@@ -495,7 +498,8 @@ static void calc_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
 static bool calc_event(wm_window_t *w, const gui_event_t *e) {
     calc_state_t *st = (calc_state_t *)w->user;
-    rect_t c = w->client;
+    rect_t c;
+    wm_client_screen_rect(w, &c);
 
     int start_y = c.y + 70;
     int gap = 6;
@@ -699,7 +703,8 @@ static void editor_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
 static bool editor_event(wm_window_t *w, const gui_event_t *e) {
     editor_state_t *st = (editor_state_t *)w->user;
-    rect_t c = w->client;
+    rect_t c;
+    wm_client_screen_rect(w, &c);
 
     rect_t btn_new = { c.x + 12, c.y + 6, 56, 24 };
     rect_t btn_save = { c.x + 76, c.y + 6, 56, 24 };
@@ -956,7 +961,8 @@ static void player_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
 static bool player_event(wm_window_t *w, const gui_event_t *e) {
     player_state_t *st = (player_state_t *)w->user;
-    rect_t c = w->client;
+    rect_t c;
+    wm_client_screen_rect(w, &c);
 
     rect_t btn_chime = { c.x + 14, c.y + 60, 94, 26 };
     rect_t btn_scale = { c.x + 116, c.y + 60, 94, 26 };
@@ -1192,7 +1198,8 @@ static void settings_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
 static bool settings_event(wm_window_t *w, const gui_event_t *e) {
     settings_state_t *st = (settings_state_t *)w->user;
-    rect_t c = w->client;
+    rect_t c;
+    wm_client_screen_rect(w, &c);
 
     int tab_w = c.w / 4;
 
@@ -1290,3 +1297,376 @@ void app_open_settings(void) {
     w->paint = settings_paint;
     w->event = settings_event;
 }
+
+/* ---- Calendar App ------------------------------------------------------- */
+
+typedef struct cal_state {
+    int year;
+    int month; /* 1 - 12 */
+    int cur_year;
+    int cur_month;
+    int cur_day;
+} cal_state_t;
+
+static int is_leap_year(int y) {
+    return (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
+}
+
+static int days_in_month(int y, int m) {
+    static const int d[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (m == 2) return 28 + is_leap_year(y);
+    if (m >= 1 && m <= 12) return d[m - 1];
+    return 30;
+}
+
+static int first_day_of_month(int y, int m) {
+    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (m < 3) y -= 1;
+    return (y + y/4 - y/100 + y/400 + t[m-1] + 1) % 7;
+}
+
+static const char *month_names[] = {
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+};
+
+static void cal_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
+    cal_state_t *st = (cal_state_t *)w->user;
+    surface_fill_rect(s, c, RGB(0x13, 0x17, 0x22));
+
+    /* Header with Month Year and Prev/Next buttons */
+    rect_t hdr = { c->x + 10, c->y + 8, c->w - 20, 34 };
+    surface_rounded_fill(s, &hdr, 7, RGB(0x1C, 0x24, 0x36));
+    surface_rounded_outline(s, &hdr, 7, RGB(0x32, 0x42, 0x5E), 1);
+
+    rect_t btn_prev = { hdr.x + 8, hdr.y + 5, 28, 24 };
+    rect_t btn_next = { hdr.x + hdr.w - 36, hdr.y + 5, 28, 24 };
+    surface_rounded_fill(s, &btn_prev, 4, RGB(0x28, 0x36, 0x4D));
+    surface_rounded_fill(s, &btn_next, 4, RGB(0x28, 0x36, 0x4D));
+    text_draw(s, font_bold(), btn_prev.x + 9, btn_prev.y + 4, "<", TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), btn_next.x + 10, btn_next.y + 4, ">", TH_TEXT_BRIGHT);
+
+    char title_buf[64];
+    snprintf(title_buf, sizeof(title_buf), "%s %d", month_names[st->month - 1], st->year);
+    int tw = text_width(font_bold(), title_buf);
+    text_draw(s, font_bold(), hdr.x + (hdr.w - tw) / 2, hdr.y + 8, title_buf, TH_TEXT_BRIGHT);
+
+    /* Weekday columns */
+    static const char *wk_names[] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
+    int col_w = (c->w - 24) / 7;
+    int row_h = 26;
+    int start_y = c->y + 50;
+
+    for (int i = 0; i < 7; i++) {
+        int wx = c->x + 12 + i * col_w;
+        color_t col = (i == 0 || i == 6) ? RGB(0x6A, 0x8C, 0xBE) : RGB(0x8A, 0xA2, 0xCE);
+        int ww = text_width(font_bold(), wk_names[i]);
+        text_draw(s, font_bold(), wx + (col_w - ww) / 2, start_y, wk_names[i], col);
+    }
+
+    /* Day numbers */
+    int fday = first_day_of_month(st->year, st->month);
+    int total_days = days_in_month(st->year, st->month);
+    int cell_y = start_y + 22;
+
+    for (int d = 1; d <= total_days; d++) {
+        int slot = fday + d - 1;
+        int row = slot / 7;
+        int col = slot % 7;
+        int dx = c->x + 12 + col * col_w;
+        int dy = cell_y + row * row_h;
+
+        bool is_today = (st->year == st->cur_year && st->month == st->cur_month && d == st->cur_day);
+
+        if (is_today) {
+            rect_t pill = { dx + (col_w - 24) / 2, dy - 2, 24, 22 };
+            surface_rounded_fill(s, &pill, 11, TH_ACCENT);
+        }
+
+        char num_str[8];
+        snprintf(num_str, sizeof(num_str), "%d", d);
+        int nw = text_width(is_today ? font_bold() : font_ui(), num_str);
+        color_t tc = is_today ? RGB(255, 255, 255) : TH_TEXT;
+        text_draw(s, is_today ? font_bold() : font_ui(), dx + (col_w - nw) / 2, dy + 2, num_str, tc);
+    }
+
+    /* Footer: Current accurate RTC time */
+    datetime_t dt;
+    rtc_get_time(&dt);
+    char foot_buf[64];
+    snprintf(foot_buf, sizeof(foot_buf), "Clock Sync: %02u:%02u:%02u UTC", dt.hour, dt.minute, dt.second);
+    int fw = text_width(font_mono(), foot_buf);
+    rect_t foot_box = { c->x + 12, c->y + c->h - 30, c->w - 24, 22 };
+    surface_rounded_fill(s, &foot_box, 5, RGB(0x18, 0x1E, 0x2C));
+    text_draw(s, font_mono(), foot_box.x + (foot_box.w - fw) / 2, foot_box.y + 4, foot_buf, RGB(0x42, 0xB0, 0xEF));
+}
+
+static bool cal_event(wm_window_t *w, const gui_event_t *e) {
+    cal_state_t *st = (cal_state_t *)w->user;
+    rect_t c;
+    wm_client_screen_rect(w, &c);
+
+    if (e->type == EV_MOUSE_DOWN && e->button == 0) {
+        rect_t hdr = { c.x + 10, c.y + 8, c.w - 20, 34 };
+        rect_t btn_prev = { hdr.x + 8, hdr.y + 5, 28, 24 };
+        rect_t btn_next = { hdr.x + hdr.w - 36, hdr.y + 5, 28, 24 };
+
+        if (rect_contains_point(&btn_prev, e->x, e->y)) {
+            st->month--;
+            if (st->month < 1) {
+                st->month = 12;
+                st->year--;
+            }
+            sound_play_click();
+            wm_invalidate(w);
+            return true;
+        }
+        if (rect_contains_point(&btn_next, e->x, e->y)) {
+            st->month++;
+            if (st->month > 12) {
+                st->month = 1;
+                st->year++;
+            }
+            sound_play_click();
+            wm_invalidate(w);
+            return true;
+        }
+    }
+
+    if (e->type == EV_KEY_DOWN && e->keycode == GUIKEY_ESCAPE) {
+        wm_destroy(w);
+        return true;
+    }
+    return false;
+}
+
+void app_open_calendar(void) {
+    wm_window_t *existing = wm_find("Calendar");
+    if (existing) {
+        wm_focus(existing);
+        return;
+    }
+
+    datetime_t dt;
+    rtc_get_time(&dt);
+
+    wm_window_t *w = wm_create("Calendar", 260, 80, 340, 300);
+    if (!w) return;
+    cal_state_t *st = (cal_state_t *)kmalloc(sizeof(cal_state_t));
+    if (!st) return;
+    st->year = dt.year ? dt.year : 2026;
+    st->month = dt.month ? dt.month : 10;
+    st->cur_year = st->year;
+    st->cur_month = st->month;
+    st->cur_day = dt.day ? dt.day : 8;
+
+    w->user = st;
+    w->paint = cal_paint;
+    w->event = cal_event;
+}
+
+/* ---- Network Manager App ------------------------------------------------ */
+
+static void net_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
+    (void)w;
+    surface_fill_rect(s, c, RGB(0x13, 0x17, 0x22));
+
+    net_state_t net;
+    net_get_state(&net);
+
+    int card_w = c->w - 24;
+
+    /* Card 1: Ethernet */
+    rect_t card_eth = { c->x + 12, c->y + 12, card_w, 76 };
+    surface_rounded_fill(s, &card_eth, 8, RGB(0x1B, 0x22, 0x30));
+    surface_rounded_outline(s, &card_eth, 8, RGB(0x2D, 0x3A, 0x52), 1);
+    text_draw(s, font_bold(), card_eth.x + 12, card_eth.y + 10, "Ethernet (eth0)", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), card_eth.x + 12, card_eth.y + 30, net.eth_connected ? "Status: Connected (1000 Mbps Full Duplex)" : "Status: Cable Disconnected", net.eth_connected ? RGB(50, 205, 120) : TH_TEXT_DIM);
+    char eth_ip_str[64];
+    snprintf(eth_ip_str, sizeof(eth_ip_str), "IPv4: %s  |  Gateway: 10.0.2.2", net.eth_ip);
+    text_draw(s, font_mono(), card_eth.x + 12, card_eth.y + 50, eth_ip_str, TH_TEXT_DIM);
+
+    rect_t btn_eth = { card_eth.x + card_eth.w - 96, card_eth.y + 10, 84, 24 };
+    surface_rounded_fill(s, &btn_eth, 5, net.eth_connected ? RGB(0x3B, 0x50, 0x72) : RGB(0x2A, 0x7B, 0x45));
+    text_draw(s, font_ui(), btn_eth.x + 10, btn_eth.y + 4, net.eth_connected ? "Disconnect" : "Connect", TH_TEXT_BRIGHT);
+
+    /* Card 2: Wi-Fi */
+    rect_t card_wifi = { c->x + 12, c->y + 96, card_w, 82 };
+    surface_rounded_fill(s, &card_wifi, 8, RGB(0x1B, 0x22, 0x30));
+    surface_rounded_outline(s, &card_wifi, 8, RGB(0x2D, 0x3A, 0x52), 1);
+    text_draw(s, font_bold(), card_wifi.x + 12, card_wifi.y + 10, "Wi-Fi (wlan0) - Intel 802.11ac", TH_TEXT_BRIGHT);
+    char wifi_st[96];
+    if (net.wifi_enabled) {
+        snprintf(wifi_st, sizeof(wifi_st), "Connected to: %s (%d%% Signal, %d dBm)", net.wifi_ssid, net.wifi_signal_pct, net.wifi_dbm);
+    } else {
+        snprintf(wifi_st, sizeof(wifi_st), "Wi-Fi Hardware Disabled");
+    }
+    text_draw(s, font_ui(), card_wifi.x + 12, card_wifi.y + 30, wifi_st, net.wifi_enabled ? RGB(50, 205, 120) : TH_TEXT_DIM);
+    text_draw(s, font_mono(), card_wifi.x + 12, card_wifi.y + 50, "Security: WPA3-Personal  |  Band: 5.0 GHz (Ch 36)", TH_TEXT_DIM);
+
+    rect_t btn_wifi = { card_wifi.x + card_wifi.w - 84, card_wifi.y + 10, 72, 24 };
+    surface_rounded_fill(s, &btn_wifi, 5, net.wifi_enabled ? RGB(0x84, 0x32, 0x32) : RGB(0x2A, 0x7B, 0x45));
+    text_draw(s, font_ui(), btn_wifi.x + 12, btn_wifi.y + 4, net.wifi_enabled ? "Turn Off" : "Turn On", TH_TEXT_BRIGHT);
+
+    /* Card 3: Bluetooth */
+    rect_t card_bt = { c->x + 12, c->y + 186, card_w, 76 };
+    surface_rounded_fill(s, &card_bt, 8, RGB(0x1B, 0x22, 0x30));
+    surface_rounded_outline(s, &card_bt, 8, RGB(0x2D, 0x3A, 0x52), 1);
+    text_draw(s, font_bold(), card_bt.x + 12, card_bt.y + 10, "Bluetooth (bt0) - Intel BT 5.3 LE", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), card_bt.x + 12, card_bt.y + 30, net.bt_enabled ? "Status: Enabled (Discoverable)" : "Status: Disabled", net.bt_enabled ? RGB(65, 160, 245) : TH_TEXT_DIM);
+    char bt_dev_str[64];
+    snprintf(bt_dev_str, sizeof(bt_dev_str), "Paired: %s (%d devices)", net.bt_device, net.bt_paired_count);
+    text_draw(s, font_mono(), card_bt.x + 12, card_bt.y + 50, bt_dev_str, TH_TEXT_DIM);
+
+    rect_t btn_bt = { card_bt.x + card_bt.w - 84, card_bt.y + 10, 72, 24 };
+    surface_rounded_fill(s, &btn_bt, 5, net.bt_enabled ? RGB(0x84, 0x32, 0x32) : RGB(0x2A, 0x7B, 0x45));
+    text_draw(s, font_ui(), btn_bt.x + 12, btn_bt.y + 4, net.bt_enabled ? "Turn Off" : "Turn On", TH_TEXT_BRIGHT);
+}
+
+static bool net_event(wm_window_t *w, const gui_event_t *e) {
+    rect_t c;
+    wm_client_screen_rect(w, &c);
+    int card_w = c.w - 24;
+
+    if (e->type == EV_MOUSE_DOWN && e->button == 0) {
+        rect_t btn_eth = { c.x + 12 + card_w - 96, c.y + 12 + 10, 84, 24 };
+        rect_t btn_wifi = { c.x + 12 + card_w - 84, c.y + 96 + 10, 72, 24 };
+        rect_t btn_bt = { c.x + 12 + card_w - 84, c.y + 186 + 10, 72, 24 };
+
+        if (rect_contains_point(&btn_eth, e->x, e->y)) {
+            net_toggle_eth();
+            sound_play_click();
+            wm_invalidate(w);
+            return true;
+        }
+        if (rect_contains_point(&btn_wifi, e->x, e->y)) {
+            net_toggle_wifi();
+            sound_play_click();
+            wm_invalidate(w);
+            return true;
+        }
+        if (rect_contains_point(&btn_bt, e->x, e->y)) {
+            net_toggle_bt();
+            sound_play_click();
+            wm_invalidate(w);
+            return true;
+        }
+    }
+
+    if (e->type == EV_KEY_DOWN && e->keycode == GUIKEY_ESCAPE) {
+        wm_destroy(w);
+        return true;
+    }
+    return false;
+}
+
+void app_open_network(void) {
+    wm_window_t *existing = wm_find("Network Connections");
+    if (existing) {
+        wm_focus(existing);
+        return;
+    }
+    wm_window_t *w = wm_create("Network Connections", 180, 80, 440, 290);
+    if (!w) return;
+    w->paint = net_paint;
+    w->event = net_event;
+}
+
+/* ---- Power & Battery Manager App ---------------------------------------- */
+
+static void power_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
+    (void)w;
+    surface_fill_rect(s, c, RGB(0x13, 0x17, 0x22));
+
+    power_state_t p;
+    power_get_state(&p);
+
+    int card_w = c->w - 24;
+
+    /* Card 1: Battery & Charger status */
+    rect_t card_bat = { c->x + 12, c->y + 12, card_w, 110 };
+    surface_rounded_fill(s, &card_bat, 8, RGB(0x1B, 0x22, 0x30));
+    surface_rounded_outline(s, &card_bat, 8, RGB(0x2D, 0x3A, 0x52), 1);
+
+    text_draw(s, font_bold(), card_bat.x + 14, card_bat.y + 10, "ACPI Battery & Power Source", TH_TEXT_BRIGHT);
+
+    /* Visual Battery Gauge */
+    rect_t b_frame = { card_bat.x + 14, card_bat.y + 36, 56, 24 };
+    surface_rounded_outline(s, &b_frame, 4, RGB(140, 160, 190), 2);
+    rect_t b_nub = { b_frame.x + b_frame.w, b_frame.y + 6, 3, 12 };
+    surface_rounded_fill(s, &b_nub, 2, RGB(140, 160, 190));
+
+    int fill_w = (50 * (int)p.battery_percent) / 100;
+    if (fill_w < 2) fill_w = 2;
+    rect_t b_fill = { b_frame.x + 3, b_frame.y + 3, fill_w, 18 };
+    color_t fill_col = p.is_charging ? RGB(45, 200, 110)
+                     : (p.battery_percent > 35 ? RGB(45, 200, 110) : (p.battery_percent > 15 ? RGB(235, 175, 40) : RGB(235, 60, 60)));
+    surface_rounded_fill(s, &b_fill, 2, fill_col);
+
+    char pct_buf[32];
+    snprintf(pct_buf, sizeof(pct_buf), "%u%% %s", p.battery_percent, p.is_charging ? "(Charging Mode)" : "(Discharging)");
+    text_draw(s, font_bold(), card_bat.x + 84, card_bat.y + 34, pct_buf, p.is_charging ? RGB(50, 220, 130) : TH_TEXT_BRIGHT);
+
+    char detail_buf[96];
+    snprintf(detail_buf, sizeof(detail_buf), "Voltage: %u mV  |  Health: 99%% (4,850 mAh / 4,900 mAh)", p.voltage_mv);
+    text_draw(s, font_mono(), card_bat.x + 84, card_bat.y + 54, detail_buf, TH_TEXT_DIM);
+
+    text_draw(s, font_ui(), card_bat.x + 14, card_bat.y + 82, p.status_str, TH_ACCENT);
+
+    /* Card 2: Controls */
+    rect_t card_ctrl = { c->x + 12, c->y + 130, card_w, 86 };
+    surface_rounded_fill(s, &card_ctrl, 8, RGB(0x1B, 0x22, 0x30));
+    surface_rounded_outline(s, &card_ctrl, 8, RGB(0x2D, 0x3A, 0x52), 1);
+
+    text_draw(s, font_bold(), card_ctrl.x + 14, card_ctrl.y + 10, "Power State Actions", TH_TEXT_BRIGHT);
+
+    rect_t btn_ac = { card_ctrl.x + 14, card_ctrl.y + 36, 150, 32 };
+    surface_rounded_fill(s, &btn_ac, 6, p.is_charging ? RGB(0x28, 0x58, 0x3C) : RGB(0x3B, 0x50, 0x72));
+    text_draw(s, font_ui(), btn_ac.x + 12, btn_ac.y + 8, p.is_charging ? "Unplug AC Charger" : "Plug In AC Charger", TH_TEXT_BRIGHT);
+
+    rect_t btn_sleep = { card_ctrl.x + 176, card_ctrl.y + 36, 160, 32 };
+    surface_rounded_fill(s, &btn_sleep, 6, RGB(0x56, 0x38, 0x82));
+    text_draw(s, font_ui(), btn_sleep.x + 14, btn_sleep.y + 8, "Enter Standby Mode", TH_TEXT_BRIGHT);
+}
+
+static bool power_event(wm_window_t *w, const gui_event_t *e) {
+    rect_t c;
+    wm_client_screen_rect(w, &c);
+
+    if (e->type == EV_MOUSE_DOWN && e->button == 0) {
+        rect_t btn_ac = { c.x + 12 + 14, c.y + 130 + 36, 150, 32 };
+        rect_t btn_sleep = { c.x + 12 + 176, c.y + 130 + 36, 160, 32 };
+
+        if (rect_contains_point(&btn_ac, e->x, e->y)) {
+            power_toggle_charging();
+            sound_play_click();
+            wm_invalidate(w);
+            return true;
+        }
+        if (rect_contains_point(&btn_sleep, e->x, e->y)) {
+            power_set_standby(true);
+            sound_play_click();
+            wm_invalidate(w);
+            return true;
+        }
+    }
+
+    if (e->type == EV_KEY_DOWN && e->keycode == GUIKEY_ESCAPE) {
+        wm_destroy(w);
+        return true;
+    }
+    return false;
+}
+
+void app_open_power(void) {
+    wm_window_t *existing = wm_find("Power & Battery Manager");
+    if (existing) {
+        wm_focus(existing);
+        return;
+    }
+    wm_window_t *w = wm_create("Power & Battery Manager", 200, 90, 400, 240);
+    if (!w) return;
+    w->paint = power_paint;
+    w->event = power_event;
+}
+

@@ -82,6 +82,14 @@
 #define OS_CMD_PLAY_SOUND     23
 #define OS_CMD_DRIVER_LIST    24
 #define OS_CMD_PCI_LIST       25
+#define OS_CMD_POWER_STATUS   26
+#define OS_CMD_POWER_STANDBY  27
+#define OS_CMD_POWER_CHARGING 28
+#define OS_CMD_NET_STATUS     29
+#define OS_CMD_NET_WIFI       30
+#define OS_CMD_NET_BT         31
+#define OS_CMD_NET_ETH        32
+#define OS_CMD_GET_TIME       33
 
 /* IPC/MYDP syscalls for cross-language integration */
 #define SYS_IPC_PORT_CREATE       70

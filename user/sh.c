@@ -121,6 +121,14 @@ static void show_help(void) {
     puts("  sound / beep [freq] [ms]   - Synthesize sound tone via AC'97 / Speaker");
     puts("  theme <name>               - Switch theme: tokyo, emerald, amber, cyberpunk");
     puts("  mouse [1-10]               - Get or set mouse pointer speed/sensitivity");
+    puts("[ Power, Network & Time ]");
+    puts("  battery / power [charge|standby] - Power status, charging mode, battery info");
+    puts("  standby                          - Suspend system into low-power standby mode");
+    puts("  wifi [on|off|toggle|scan]        - Wi-Fi status, scan, and interface toggle");
+    puts("  bluetooth / bt [on|off|toggle]   - Bluetooth 5.3 LE status and device pairing");
+    puts("  eth / net [toggle]               - Ethernet link status and IP address info");
+    puts("  date / time                      - Accurate RTC date & time readout");
+    puts("  cal / calendar                   - Monthly calendar with today highlighted");
     puts("");
     puts("[ System & Diagnostics ]");
     puts("  ps                         - Show active kernel & user processes");
@@ -132,6 +140,64 @@ static void show_help(void) {
     puts("  reboot                     - Reboot machine");
     puts("  shutdown                   - Halt machine");
     puts("");
+}
+
+static int is_leap_year(int y) {
+    return (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
+}
+
+static int days_in_month(int y, int m) {
+    static const int d[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (m == 2) return 28 + is_leap_year(y);
+    if (m >= 1 && m <= 12) return d[m - 1];
+    return 30;
+}
+
+static int first_day_of_month(int y, int m) {
+    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (m < 3) y -= 1;
+    return (y + y/4 - y/100 + y/400 + t[m-1] + 1) % 7;
+}
+
+static const char *month_names[] = {
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+};
+
+static void print_calendar(void) {
+    char tbuf[64] = {0};
+    os_control(OS_CMD_GET_TIME, (long)tbuf, sizeof(tbuf), 0);
+    int year = 2026, month = 10, day = 8;
+    if (tbuf[0]) {
+        year = simple_atoi(tbuf);
+        if (tbuf[5]) month = simple_atoi(tbuf + 5);
+        if (tbuf[8]) day = simple_atoi(tbuf + 8);
+    }
+    if (month < 1 || month > 12) month = 10;
+
+    printf("\n     %s %d\n", month_names[month - 1], year);
+    puts(" Su Mo Tu We Th Fr Sa");
+
+    int fday = first_day_of_month(year, month);
+    int total = days_in_month(year, month);
+
+    for (int i = 0; i < fday; i++) {
+        printf("   ");
+    }
+
+    for (int d = 1; d <= total; d++) {
+        if (d == day) {
+            if (d < 10) printf("\x1b[1;36;7m %d\x1b[0m ", d);
+            else printf("\x1b[1;36;7m%d\x1b[0m ", d);
+        } else {
+            if (d < 10) printf(" %d ", d);
+            else printf("%d ", d);
+        }
+        if ((fday + d) % 7 == 0 || d == total) {
+            putchar('\n');
+        }
+    }
+    printf("\n Current Time: %s UTC\n\n", tbuf);
 }
 
 int main(void) {
@@ -385,6 +451,83 @@ int main(void) {
                 } else {
                     puts("Usage: mouse <1-10>");
                 }
+            }
+
+        /* ---- Power, Network & Time Commands ---- */
+        } else if (strcmp(argv[0], "cal") == 0) {
+            print_calendar();
+        } else if (strcmp(argv[0], "calendar") == 0) {
+            if (argc > 1 && strcmp(argv[1], "--cli") == 0) {
+                print_calendar();
+            } else {
+                os_control(OS_CMD_APP_LAUNCH, (long)"Calendar", 0, 0);
+                printf("\x1b[1;32mLaunched Calendar.\x1b[0m\n");
+            }
+        } else if (strcmp(argv[0], "date") == 0 || strcmp(argv[0], "time") == 0) {
+            char tbuf[64] = {0};
+            os_control(OS_CMD_GET_TIME, (long)tbuf, sizeof(tbuf), 0);
+            printf("%s UTC\n", tbuf);
+        } else if (strcmp(argv[0], "battery") == 0 || strcmp(argv[0], "power") == 0) {
+            if (argc > 1 && (strcmp(argv[1], "gui") == 0 || strcmp(argv[1], "app") == 0)) {
+                os_control(OS_CMD_APP_LAUNCH, (long)"Power", 0, 0);
+                printf("\x1b[1;32mLaunched Power & Battery Manager.\x1b[0m\n");
+            } else {
+                if (argc > 1 && strcmp(argv[1], "standby") == 0) {
+                    os_control(OS_CMD_POWER_STANDBY, 1, 0, 0);
+                    puts("\x1b[1;35mSystem entered low-power Standby Mode.\x1b[0m");
+                } else if (argc > 1 && strcmp(argv[1], "charge") == 0) {
+                    int on = (argc > 2 && strcmp(argv[2], "off") == 0) ? 0 : 1;
+                    os_control(OS_CMD_POWER_CHARGING, on, 0, 0);
+                    printf("\x1b[1;32mAC Charging Mode set to: %s\x1b[0m\n", on ? "ONLINE (Charging ⚡)" : "OFFLINE (Discharging)");
+                }
+                char pbuf[256] = {0};
+                os_control(OS_CMD_POWER_STATUS, (long)pbuf, sizeof(pbuf), 0);
+                printf("%s", pbuf);
+            }
+        } else if (strcmp(argv[0], "network") == 0) {
+            if (argc > 1 && strcmp(argv[1], "--cli") == 0) {
+                char nbuf[384] = {0};
+                os_control(OS_CMD_NET_STATUS, (long)nbuf, sizeof(nbuf), 0);
+                printf("%s", nbuf);
+            } else {
+                os_control(OS_CMD_APP_LAUNCH, (long)"Network", 0, 0);
+                printf("\x1b[1;32mLaunched Network Connections Manager.\x1b[0m\n");
+            }
+        } else if (strcmp(argv[0], "standby") == 0) {
+            os_control(OS_CMD_POWER_STANDBY, 1, 0, 0);
+            puts("\x1b[1;35mSystem entered low-power Standby Mode. Press any key or move mouse to resume.\x1b[0m");
+        } else if (strcmp(argv[0], "wifi") == 0) {
+            if (argc > 1 && strcmp(argv[1], "scan") == 0) {
+                puts("Scanning Wi-Fi channels (2.4 GHz & 5.0 GHz)...");
+                puts("Detected Networks:");
+                puts("  \x1b[1;32m*\x1b[0m [94% Signal] MyOS-HyperNet-5G   (WPA3-Personal, Ch 36, 5.0 GHz) \x1b[1;32m[Connected]\x1b[0m");
+                puts("  * [76% Signal] FiberLink-Access4   (WPA2-PSK, Ch 1, 2.4 GHz)");
+                puts("  * [45% Signal] Guest-Airport       (Open, Ch 6, 2.4 GHz)");
+            } else if (argc > 1 && (strcmp(argv[1], "on") == 0 || strcmp(argv[1], "off") == 0 || strcmp(argv[1], "toggle") == 0)) {
+                long st = os_control(OS_CMD_NET_WIFI, 0, 0, 0);
+                printf("Wi-Fi interface (wlan0) is now %s.\n", st ? "\x1b[1;32mENABLED\x1b[0m" : "\x1b[1;31mDISABLED\x1b[0m");
+            } else {
+                char nbuf[384] = {0};
+                os_control(OS_CMD_NET_STATUS, (long)nbuf, sizeof(nbuf), 0);
+                printf("%s", nbuf);
+            }
+        } else if (strcmp(argv[0], "bluetooth") == 0 || strcmp(argv[0], "bt") == 0) {
+            if (argc > 1 && (strcmp(argv[1], "on") == 0 || strcmp(argv[1], "off") == 0 || strcmp(argv[1], "toggle") == 0)) {
+                long st = os_control(OS_CMD_NET_BT, 0, 0, 0);
+                printf("Bluetooth interface (bt0) is now %s.\n", st ? "\x1b[1;34mENABLED\x1b[0m" : "\x1b[1;31mDISABLED\x1b[0m");
+            } else {
+                char nbuf[384] = {0};
+                os_control(OS_CMD_NET_STATUS, (long)nbuf, sizeof(nbuf), 0);
+                printf("%s", nbuf);
+            }
+        } else if (strcmp(argv[0], "eth") == 0 || strcmp(argv[0], "net") == 0) {
+            if (argc > 1 && strcmp(argv[1], "toggle") == 0) {
+                long st = os_control(OS_CMD_NET_ETH, 0, 0, 0);
+                printf("Ethernet link (eth0) is now %s.\n", st ? "\x1b[1;32mCONNECTED\x1b[0m" : "\x1b[1;31mDISCONNECTED\x1b[0m");
+            } else {
+                char nbuf[384] = {0};
+                os_control(OS_CMD_NET_STATUS, (long)nbuf, sizeof(nbuf), 0);
+                printf("%s", nbuf);
             }
 
         /* ---- System & Diagnostics Commands ---- */

@@ -14,5 +14,8 @@ void app_open_calculator(void); /* interactive arithmetic calculator */
 void app_open_editor(void);     /* text editor and notepad        */
 void app_open_player(void);     /* sound player & audio studio    */
 void app_open_settings(void);   /* control center & system settings */
+void app_open_calendar(void);   /* interactive RTC calendar & date */
+void app_open_network(void);    /* WiFi, Bluetooth & Ethernet manager */
+void app_open_power(void);      /* Battery, charging & standby manager */
 
 #endif

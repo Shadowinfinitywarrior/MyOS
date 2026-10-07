@@ -120,6 +120,7 @@ wm_window_t *wm_create(const char *title, int x, int y, int w, int h) {
     win->surf = surface_create(w, h);
     if (!win->surf) { kfree(win); return NULL; }
 
+    client_on_screen(win, &win->client);
     windows[win_count++] = win;
     wm_focus(win);
     return win;
@@ -296,6 +297,7 @@ static void clamp_to_screen(wm_window_t *w) {
     if (w->frame.y > screen_h - WM_TITLEBAR_H - 4) w->frame.y = screen_h - WM_TITLEBAR_H - 4;
     if (w->frame.x < -w->frame.w + 60) w->frame.x = -w->frame.w + 60;
     if (w->frame.y < 0) w->frame.y = 0;
+    client_on_screen(w, &w->client);
 }
 
 static void toggle_maximize(wm_window_t *w) {
@@ -310,6 +312,7 @@ static void toggle_maximize(wm_window_t *w) {
         w->frame.h = screen_h;
         w->flags |= WF_MAXIMIZED;
     }
+    client_on_screen(w, &w->client);
     sync_surface(w);
     wm_invalidate(w);
 }
@@ -345,6 +348,7 @@ static void apply_resize(wm_window_t *w, wm_edge_t e, int dx, int dy) {
         hh = WM_MIN_H + WM_TITLEBAR_H;
     }
     w->frame.x = x; w->frame.y = y; w->frame.w = ww; w->frame.h = hh;
+    client_on_screen(w, &w->client);
     sync_surface(w);
     wm_invalidate(w);
 }
@@ -529,43 +533,64 @@ void wm_compose(void) {
             w->dirty = false;
         }
 
-        /* Soft ambient drop shadow beneath the window */
+        /* Crisp, modern ambient edge shadow beneath the window (fast strips) */
         uint32_t *bb = fb_get_backbuffer();
         if (bb && !(w->flags & WF_MAXIMIZED)) {
             int stride = fb_get_stride();
-            rect_t outer = { w->frame.x - WM_SHADOW_PAD + 2, w->frame.y - WM_SHADOW_PAD + 4,
-                             w->frame.w + WM_SHADOW_PAD * 2, w->frame.h + WM_SHADOW_PAD * 2 };
-            rect_t screen = { 0, 0, screen_w, screen_h };
-            rect_t vis;
-            if (rect_intersect(&outer, &screen, &vis)) {
-                for (int y = vis.y; y < vis.y + vis.h; y++) {
+            int fx = w->frame.x;
+            int fy = w->frame.y;
+            int fw = w->frame.w;
+            int fh = w->frame.h;
+            int s_depth = 4;
+
+            /* Right edge shadow strip */
+            int rx_start = fx + fw;
+            int rx_end = rx_start + s_depth;
+            if (rx_end > screen_w) rx_end = screen_w;
+            int ry_start = (fy + 3 < 0) ? 0 : fy + 3;
+            int ry_end = fy + fh + s_depth;
+            if (ry_end > screen_h) ry_end = screen_h;
+
+            if (rx_start < screen_w && ry_start < ry_end) {
+                for (int y = ry_start; y < ry_end; y++) {
                     uint32_t *row = bb + (size_t)y * (uint32_t)stride;
-                    for (int x = vis.x; x < vis.x + vis.w; x++) {
-                        bool inside_frame = x >= w->frame.x && x < w->frame.x + w->frame.w &&
-                                            y >= w->frame.y && y < w->frame.y + w->frame.h;
-                        if (inside_frame) continue;
-                        int dx = x < w->frame.x ? w->frame.x - x
-                               : (x >= w->frame.x + w->frame.w ? x - (w->frame.x + w->frame.w - 1) : 0);
-                        int dy = y < w->frame.y ? w->frame.y - y
-                               : (y >= w->frame.y + w->frame.h ? y - (w->frame.y + w->frame.h - 1) : 0);
-                        int d;
-                        if (dx > 0 && dy > 0) {
-                            d = (dx > dy) ? (dx + (dy * 3) / 8) : (dy + (dx * 3) / 8);
-                        } else {
-                            d = dx > dy ? dx : dy;
-                        }
-                        if (d > WM_SHADOW_PAD) continue;
-                        uint32_t c = row[x];
-                        uint32_t rem = (uint32_t)(WM_SHADOW_PAD - d);
-                        uint32_t alpha = (rem * rem * 140) / (WM_SHADOW_PAD * WM_SHADOW_PAD);
+                    for (int x = rx_start; x < rx_end; x++) {
+                        int dist = x - rx_start + 1;
+                        uint32_t alpha = 130 / (dist + 1);
                         uint32_t inv = 256 - alpha;
+                        uint32_t c = row[x];
                         uint32_t r = (((c >> 16) & 0xFF) * inv) >> 8;
                         uint32_t g = (((c >> 8) & 0xFF) * inv) >> 8;
                         uint32_t b = ((c & 0xFF) * inv) >> 8;
                         row[x] = (r << 16) | (g << 8) | b;
                     }
                 }
-                fb_add_damage(vis.x, vis.y, vis.w, vis.h);
+                fb_add_damage(rx_start, ry_start, rx_end - rx_start, ry_end - ry_start);
+            }
+
+            /* Bottom edge shadow strip */
+            int by_start = fy + fh;
+            int by_end = by_start + s_depth;
+            if (by_end > screen_h) by_end = screen_h;
+            int bx_start = (fx + 3 < 0) ? 0 : fx + 3;
+            int bx_end = fx + fw;
+            if (bx_end > screen_w) bx_end = screen_w;
+
+            if (by_start < screen_h && bx_start < bx_end) {
+                for (int y = by_start; y < by_end; y++) {
+                    uint32_t *row = bb + (size_t)y * (uint32_t)stride;
+                    int dist = y - by_start + 1;
+                    uint32_t alpha = 130 / (dist + 1);
+                    uint32_t inv = 256 - alpha;
+                    for (int x = bx_start; x < bx_end; x++) {
+                        uint32_t c = row[x];
+                        uint32_t r = (((c >> 16) & 0xFF) * inv) >> 8;
+                        uint32_t g = (((c >> 8) & 0xFF) * inv) >> 8;
+                        uint32_t b = ((c & 0xFF) * inv) >> 8;
+                        row[x] = (r << 16) | (g << 8) | b;
+                    }
+                }
+                fb_add_damage(bx_start, by_start, bx_end - bx_start, by_end - by_start);
             }
         }
 

@@ -23,6 +23,7 @@
 #include "../drivers/driver.h"
 #include "../drivers/pci.h"
 #include "storage.h"
+#include "power_net.h"
 
 extern char keyboard_getchar(void);
 
@@ -1055,6 +1056,81 @@ static int32_t sys_os_control(uint64_t cmd, uint64_t a1, uint64_t a2, uint64_t a
             }
             if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
             return n;
+        }
+        case OS_CMD_POWER_STATUS: {
+            power_state_t p;
+            power_get_state(&p);
+            if (a1 && a2 > 0) {
+                char out[256];
+                snprintf(out, sizeof(out), "Power: %s | Battery: %u%% | Voltage: %u mV\nStatus: %s\nStandby: %s\n",
+                         p.is_charging ? "AC Online (Charging)" : "Battery (Discharging)",
+                         p.battery_percent, p.voltage_mv, p.status_str,
+                         p.is_standby ? "Active" : "Normal");
+                if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            }
+            return (long)p.battery_percent;
+        }
+        case OS_CMD_POWER_STANDBY: {
+            if (a1 == 1) power_set_standby(true);
+            else if (a1 == 0) power_set_standby(false);
+            else power_toggle_standby();
+            power_state_t p;
+            power_get_state(&p);
+            return p.is_standby ? 1 : 0;
+        }
+        case OS_CMD_POWER_CHARGING: {
+            if (a1 == 1) power_set_charging(true);
+            else if (a1 == 0) power_set_charging(false);
+            else power_toggle_charging();
+            power_state_t p;
+            power_get_state(&p);
+            return p.is_charging ? 1 : 0;
+        }
+        case OS_CMD_NET_STATUS: {
+            net_state_t n;
+            net_get_state(&n);
+            if (a1 && a2 > 0) {
+                char out[384];
+                snprintf(out, sizeof(out),
+                         "Ethernet (eth0): %s | %s | IP: %s\n"
+                         "Wi-Fi    (wlan0): %s | SSID: %s | Signal: %d%% (%d dBm)\n"
+                         "Bluetooth (bt0): %s | Device: %s (%d paired)\n",
+                         n.eth_connected ? "Connected" : "Disconnected", n.eth_speed, n.eth_ip,
+                         n.wifi_enabled ? (n.wifi_connected ? "Connected" : "Scanning") : "Disabled",
+                         n.wifi_ssid, n.wifi_signal_pct, n.wifi_dbm,
+                         n.bt_enabled ? "Enabled" : "Disabled", n.bt_device, n.bt_paired_count);
+                if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            }
+            return 0;
+        }
+        case OS_CMD_NET_WIFI: {
+            net_toggle_wifi();
+            net_state_t n;
+            net_get_state(&n);
+            return n.wifi_enabled ? 1 : 0;
+        }
+        case OS_CMD_NET_BT: {
+            net_toggle_bt();
+            net_state_t n;
+            net_get_state(&n);
+            return n.bt_enabled ? 1 : 0;
+        }
+        case OS_CMD_NET_ETH: {
+            net_toggle_eth();
+            net_state_t n;
+            net_get_state(&n);
+            return n.eth_connected ? 1 : 0;
+        }
+        case OS_CMD_GET_TIME: {
+            datetime_t dt;
+            rtc_get_time(&dt);
+            if (a1 && a2 > 0) {
+                char out[64];
+                snprintf(out, sizeof(out), "%04u-%02u-%02u %02u:%02u:%02u",
+                         dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second);
+                if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            }
+            return (long)((dt.hour << 16) | (dt.minute << 8) | dt.second);
         }
         default:
             return -1;
