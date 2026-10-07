@@ -15,6 +15,19 @@ static uint32_t     next_id = 1;
 static uint32_t     last_click_time;
 static int          last_click_x, last_click_y;
 
+/* Enhanced WM state */
+static int alt_tab_active = 0;
+static wm_window_t *alt_tab_candidates[WM_MAX_WINDOWS];
+static int alt_tab_count = 0;
+static int alt_tab_index = 0;
+
+static int current_desktop = 0;
+static wm_window_t *desktop_windows[WM_MAX_DESKTOPS][WM_MAX_WINDOWS];
+static int desktop_win_count[WM_MAX_DESKTOPS] = {0};
+
+static int show_desktop_prev_desktop = -1;
+int show_desktop_active = 0;
+
 /* A window's surface covers the WHOLE frame, title bar included. Keeping the
  * decorations inside the surface means every coordinate the window manager
  * draws with is surface-local, and presenting a window is a single blit. The
@@ -221,12 +234,17 @@ wm_window_t *wm_window_at_point(int x, int y) {
 
 typedef enum { HIT_CLIENT, HIT_TITLE, HIT_CLOSE, HIT_MIN, HIT_MAX, HIT_EDGE } hit_t;
 
-/* Button slots, measured from the right edge of the title bar. */
-#define BTN_W 30
-#define BTN_H 16
+/* Modern traffic-light buttons on the top-left of the titlebar */
+#define BTN_SIZE 12
+#define BTN_GAP  8
+#define BTN_START_X 14
+
 static int btn_x(const wm_window_t *w, int slot) {
-    /* slot 0 = close (rightmost), 1 = maximize, 2 = minimize */
-    return w->frame.x + w->frame.w - WM_BORDER_W - BTN_W * (slot + 1) + (BTN_W - BTN_H) / 2;
+    /* slot 0 = close, 1 = maximize, 2 = minimize */
+    int x0 = w->frame.x + BTN_START_X;
+    if (slot == 0) return x0;
+    if (slot == 2) return x0 + (BTN_SIZE + BTN_GAP);
+    return x0 + (BTN_SIZE + BTN_GAP) * 2;
 }
 
 static hit_t hit_test(const wm_window_t *w, int x, int y, wm_edge_t *edge_out) {
@@ -234,15 +252,13 @@ static hit_t hit_test(const wm_window_t *w, int x, int y, wm_edge_t *edge_out) {
     if (!rect_contains_point(&w->frame, x, y)) return HIT_CLIENT;
     if (w->flags & WF_NO_DECOR) return HIT_CLIENT;
 
-    /* The title bar stays hit-testable while maximized, otherwise the window
-     * buttons and the double-click-to-restore gesture become unreachable the
-     * moment the window is maximized - there is no other way out. */
+    /* The title bar stays hit-testable while maximized */
     int tb_y = w->frame.y + WM_BORDER_W;
     if (y >= tb_y && y < tb_y + WM_TITLEBAR_H) {
         for (int slot = 0; slot < 3; slot++) {
             int bx = btn_x(w, slot);
-            int by = tb_y + (WM_TITLEBAR_H - BTN_H) / 2;
-            if (x >= bx && x < bx + BTN_H && y >= by && y < by + BTN_H)
+            int by = tb_y + (WM_TITLEBAR_H - BTN_SIZE) / 2;
+            if (x >= bx - 3 && x < bx + BTN_SIZE + 3 && y >= by - 3 && y < by + BTN_SIZE + 3)
                 return slot == 0 ? HIT_CLOSE : (slot == 1 ? HIT_MAX : HIT_MIN);
         }
         return HIT_TITLE;
@@ -448,33 +464,6 @@ bool wm_handle_event(const gui_event_t *e) {
 
 /* ---- painting ------------------------------------------------------------ */
 
-static void glyph_x(surface_t *s, int cx, int cy, color_t col) {
-    for (int i = -3; i <= 3; i++) {
-        surface_pixel(s, cx + i, cy + i, col);
-        surface_pixel(s, cx - i, cy + i, col);
-    }
-}
-
-static void glyph_min(surface_t *s, int cx, int cy, color_t col) {
-    for (int i = -4; i <= 4; i++) surface_pixel(s, cx + i, cy, col);
-}
-
-static void glyph_max(surface_t *s, int cx, int cy, color_t col, bool maximized) {
-    for (int i = -4; i <= 4; i++) {
-        surface_pixel(s, cx + i, cy - 4, col);
-        surface_pixel(s, cx + i, cy + 4, col);
-        surface_pixel(s, cx - 4, cy + i, col);
-        surface_pixel(s, cx + 4, cy + i, col);
-    }
-    if (maximized) {
-        for (int i = -2; i <= 2; i++) {
-            surface_pixel(s, cx + i, cy - 1, col);
-            surface_pixel(s, cx + i, cy - 7, col);
-            surface_pixel(s, cx - 6, cy - 1 + i, col);
-            surface_pixel(s, cx - 3, cy - 1 + i, col);
-        }
-    }
-}
 
 static void draw_decorations(wm_window_t *w) {
     surface_t *s = w->surf;
@@ -484,43 +473,49 @@ static void draw_decorations(wm_window_t *w) {
     color_t bar    = w->focused ? TH_TITLE_FOCUS : TH_TITLE;
     color_t text   = w->focused ? TH_TITLE_TEXT : TH_TITLE_TEXT_DIM;
 
-    /* Frame border. */
+    /* Frame border: 1px precision modern border */
     rect_t r = { 0, 0, w->frame.w, w->frame.h };
-    surface_rect_outline(s, &r, border, WM_BORDER_W);
-    if (w->frame.w > 2 && w->frame.h > 2) {
-        rect_t inner = { 1, 1, w->frame.w - 2, w->frame.h - 2 };
-        surface_rect_outline(s, &inner, border, 1);
-    }
+    surface_rect_outline(s, &r, border, 1);
 
     if (w->flags & WF_NO_DECOR) return;
 
-    /* Title bar. */
-    rect_t tb = { WM_BORDER_W, WM_BORDER_W, w->frame.w - WM_BORDER_W * 2, WM_TITLEBAR_H };
+    /* Title bar: acrylic dark styling */
+    rect_t tb = { 1, 1, w->frame.w - 2, WM_TITLEBAR_H };
     surface_fill_rect(s, &tb, bar);
-    /* Accent stripe on the left of the title bar, like a modern title bar. */
-    rect_t stripe = { WM_BORDER_W, WM_BORDER_W, 3, WM_TITLEBAR_H };
-    surface_fill_rect(s, &stripe, w->focused ? TH_ACCENT : TH_BORDER);
 
+    /* 1px top highlight and bottom separator line */
+    rect_t top_edge = { 1, 1, w->frame.w - 2, 1 };
+    surface_fill_rect(s, &top_edge, w->focused ? RGB(0x36, 0x3D, 0x4B) : RGB(0x28, 0x2D, 0x36));
+    rect_t bot_edge = { 1, WM_TITLEBAR_H, w->frame.w - 2, 1 };
+    surface_fill_rect(s, &bot_edge, RGB(0x1B, 0x1F, 0x27));
+
+    /* Traffic-light buttons on the left */
+    int by = tb.y + (tb.h - BTN_SIZE) / 2;
+    int x_close = 1 + BTN_START_X;
+    int x_min   = x_close + (BTN_SIZE + BTN_GAP);
+    int x_max   = x_min + (BTN_SIZE + BTN_GAP);
+
+    /* Close (Coral Red) */
+    rect_t r_close = { x_close, by, BTN_SIZE, BTN_SIZE };
+    surface_rounded_fill(s, &r_close, 6, w->focused ? TH_BTN_CLOSE : RGB(0x48, 0x4F, 0x58));
+    surface_rounded_outline(s, &r_close, 6, w->focused ? RGB(0xE0, 0x44, 0x3E) : RGB(0x38, 0x3E, 0x47), 1);
+
+    /* Minimize (Amber) */
+    rect_t r_min = { x_min, by, BTN_SIZE, BTN_SIZE };
+    surface_rounded_fill(s, &r_min, 6, w->focused ? TH_BTN_MIN : RGB(0x48, 0x4F, 0x58));
+    surface_rounded_outline(s, &r_min, 6, w->focused ? RGB(0xDE, 0xA1, 0x23) : RGB(0x38, 0x3E, 0x47), 1);
+
+    /* Maximize (Emerald) */
+    rect_t r_max = { x_max, by, BTN_SIZE, BTN_SIZE };
+    surface_rounded_fill(s, &r_max, 6, w->focused ? TH_BTN_MAX : RGB(0x48, 0x4F, 0x58));
+    surface_rounded_outline(s, &r_max, 6, w->focused ? RGB(0x1A, 0xAB, 0x29) : RGB(0x38, 0x3E, 0x47), 1);
+
+    /* Centered crisp title */
+    int tw = text_width(font_bold(), w->title);
+    int tx = (w->frame.w - tw) / 2;
+    if (tx < x_max + BTN_SIZE + 16) tx = x_max + BTN_SIZE + 16;
     int ty = tb.y + (tb.h - 15) / 2;
-    text_draw_n(s, font_bold(), tb.x + 12, ty, w->title,
-                w->frame.w - 120, text);
-
-    /* Buttons, right to left. */
-    int by = tb.y + (tb.h - BTN_H) / 2;
-    int x_close = w->frame.w - WM_BORDER_W - BTN_W + (BTN_W - BTN_H) / 2;
-    int x_max   = x_close - BTN_W;
-    int x_min   = x_max - BTN_W;
-
-    if (w->focused) {
-        rect_t cb = { x_close, by, BTN_H, BTN_H };
-        surface_rounded_fill(s, &cb, 4, TH_BTN_CLOSE);
-        glyph_x(s, x_close + BTN_H / 2, by + BTN_H / 2, RGB(0xFF, 0xFF, 0xFF));
-    } else {
-        glyph_x(s, x_close + BTN_H / 2, by + BTN_H / 2, TH_TITLE_TEXT_DIM);
-    }
-    glyph_min(s, x_max + BTN_H / 2, by + BTN_H / 2, TH_TITLE_TEXT);
-    glyph_max(s, x_min + BTN_H / 2, by + BTN_H / 2, TH_TITLE_TEXT,
-              (w->flags & WF_MAXIMIZED) != 0);
+    text_draw_n(s, font_bold(), tx, ty, w->title, w->frame.w - tx - 16, text);
 }
 
 void wm_compose(void) {
@@ -536,11 +531,11 @@ void wm_compose(void) {
             w->dirty = false;
         }
 
-        /* Drop shadow on the back buffer, beneath the window. */
+        /* Soft ambient drop shadow beneath the window */
         uint32_t *bb = fb_get_backbuffer();
         if (bb && !(w->flags & WF_MAXIMIZED)) {
             int stride = fb_get_stride();
-            rect_t outer = { w->frame.x - WM_SHADOW_PAD + 4, w->frame.y - WM_SHADOW_PAD + 8,
+            rect_t outer = { w->frame.x - WM_SHADOW_PAD + 2, w->frame.y - WM_SHADOW_PAD + 4,
                              w->frame.w + WM_SHADOW_PAD * 2, w->frame.h + WM_SHADOW_PAD * 2 };
             rect_t screen = { 0, 0, screen_w, screen_h };
             rect_t vis;
@@ -548,8 +543,6 @@ void wm_compose(void) {
                 for (int y = vis.y; y < vis.y + vis.h; y++) {
                     uint32_t *row = bb + (size_t)y * (uint32_t)stride;
                     for (int x = vis.x; x < vis.x + vis.w; x++) {
-                        /* Darken only in the ring between the frame and the
-                         * outer edge, so the shadow fades outward. */
                         bool inside_frame = x >= w->frame.x && x < w->frame.x + w->frame.w &&
                                             y >= w->frame.y && y < w->frame.y + w->frame.h;
                         if (inside_frame) continue;
@@ -557,13 +550,20 @@ void wm_compose(void) {
                                : (x >= w->frame.x + w->frame.w ? x - (w->frame.x + w->frame.w - 1) : 0);
                         int dy = y < w->frame.y ? w->frame.y - y
                                : (y >= w->frame.y + w->frame.h ? y - (w->frame.y + w->frame.h - 1) : 0);
-                        int d = dx > dy ? dx : dy;
+                        int d;
+                        if (dx > 0 && dy > 0) {
+                            d = (dx > dy) ? (dx + (dy * 3) / 8) : (dy + (dx * 3) / 8);
+                        } else {
+                            d = dx > dy ? dx : dy;
+                        }
                         if (d > WM_SHADOW_PAD) continue;
                         uint32_t c = row[x];
-                        uint32_t f = (uint32_t)(d * 24) / (uint32_t)WM_SHADOW_PAD;
-                        uint32_t r = ((c >> 16) & 0xFF) * (64 - f) / 64;
-                        uint32_t g = ((c >> 8) & 0xFF) * (64 - f) / 64;
-                        uint32_t b = (c & 0xFF) * (64 - f) / 64;
+                        uint32_t rem = (uint32_t)(WM_SHADOW_PAD - d);
+                        uint32_t alpha = (rem * rem * 140) / (WM_SHADOW_PAD * WM_SHADOW_PAD);
+                        uint32_t inv = 256 - alpha;
+                        uint32_t r = (((c >> 16) & 0xFF) * inv) >> 8;
+                        uint32_t g = (((c >> 8) & 0xFF) * inv) >> 8;
+                        uint32_t b = ((c & 0xFF) * inv) >> 8;
                         row[x] = (r << 16) | (g << 8) | b;
                     }
                 }
@@ -572,5 +572,214 @@ void wm_compose(void) {
         }
 
         if (w->surf) surface_present(w->surf, w->frame.x, w->frame.y, NULL);
+    }
+}
+
+/* ---- Enhanced WM features -------------------------------------------------- */
+
+/* Build list of visible, non-minimized windows on current desktop for Alt+Tab */
+static void build_alt_tab_list(void) {
+    alt_tab_count = 0;
+    for (int i = win_count - 1; i >= 0; i--) {
+        wm_window_t *w = windows[i];
+        if (w->visible && !(w->flags & WF_MINIMIZED)) {
+            alt_tab_candidates[alt_tab_count++] = w;
+            if (alt_tab_count >= WM_MAX_WINDOWS) break;
+        }
+    }
+}
+
+/* Alt+Tab: cycle to next window */
+void wm_cycle_next(void) {
+    if (!alt_tab_active) {
+        build_alt_tab_list();
+        if (alt_tab_count == 0) return;
+        alt_tab_active = 1;
+        alt_tab_index = 0;
+    } else {
+        alt_tab_index = (alt_tab_index + 1) % alt_tab_count;
+    }
+    if (alt_tab_index < alt_tab_count) {
+        wm_focus(alt_tab_candidates[alt_tab_index]);
+        wm_raise(alt_tab_candidates[alt_tab_index]);
+    }
+}
+
+/* Alt+Shift+Tab: cycle to previous window */
+void wm_cycle_prev(void) {
+    if (!alt_tab_active) {
+        build_alt_tab_list();
+        if (alt_tab_count == 0) return;
+        alt_tab_active = 1;
+        alt_tab_index = 0;
+    } else {
+        alt_tab_index = (alt_tab_index - 1 + alt_tab_count) % alt_tab_count;
+    }
+    if (alt_tab_index < alt_tab_count) {
+        wm_focus(alt_tab_candidates[alt_tab_index]);
+        wm_raise(alt_tab_candidates[alt_tab_index]);
+    }
+}
+
+/* End Alt+Tab mode (called on Alt release) */
+void wm_alt_tab_end(void) {
+    alt_tab_active = 0;
+    alt_tab_count = 0;
+    alt_tab_index = 0;
+}
+
+/* Snap window to screen edge (Win+Arrow) */
+void wm_snap_window(wm_window_t *w, int edge) {
+    if (!w || (w->flags & (WF_MAXIMIZED | WF_MINIMIZED))) return;
+    
+    int half_w = screen_w / 2;
+    int half_h = screen_h / 2;
+    
+    switch (edge) {
+        case EDGE_W:  /* Left half */
+            w->frame.x = 0;
+            w->frame.y = 0;
+            w->frame.w = half_w;
+            w->frame.h = screen_h;
+            break;
+        case EDGE_E:  /* Right half */
+            w->frame.x = half_w;
+            w->frame.y = 0;
+            w->frame.w = half_w;
+            w->frame.h = screen_h;
+            break;
+        case EDGE_N:  /* Top half */
+            w->frame.x = 0;
+            w->frame.y = 0;
+            w->frame.w = screen_w;
+            w->frame.h = half_h;
+            break;
+        case EDGE_S:  /* Bottom half */
+            w->frame.x = 0;
+            w->frame.y = half_h;
+            w->frame.w = screen_w;
+            w->frame.h = half_h;
+            break;
+        case EDGE_NW: /* Top-left quarter */
+            w->frame.x = 0;
+            w->frame.y = 0;
+            w->frame.w = half_w;
+            w->frame.h = half_h;
+            break;
+        case EDGE_NE: /* Top-right quarter */
+            w->frame.x = half_w;
+            w->frame.y = 0;
+            w->frame.w = half_w;
+            w->frame.h = half_h;
+            break;
+        case EDGE_SW: /* Bottom-left quarter */
+            w->frame.x = 0;
+            w->frame.y = half_h;
+            w->frame.w = half_w;
+            w->frame.h = half_h;
+            break;
+        case EDGE_SE: /* Bottom-right quarter */
+            w->frame.x = half_w;
+            w->frame.y = half_h;
+            w->frame.w = half_w;
+            w->frame.h = half_h;
+            break;
+    }
+    sync_surface(w);
+    wm_invalidate(w);
+}
+
+/* Toggle maximize state */
+void wm_toggle_maximize(wm_window_t *w) {
+    if (!w) return;
+    if (w->flags & WF_MAXIMIZED) {
+        w->frame = w->restore;
+        w->flags &= ~WF_MAXIMIZED;
+    } else {
+        w->restore = w->frame;
+        w->frame.x = 0;
+        w->frame.y = 0;
+        w->frame.w = screen_w;
+        w->frame.h = screen_h;
+        w->flags |= WF_MAXIMIZED;
+    }
+    sync_surface(w);
+    wm_invalidate(w);
+}
+
+/* Minimize all windows (Win+D) */
+void wm_minimize_all(void) {
+    if (show_desktop_active) return;
+    show_desktop_active = 1;
+    show_desktop_prev_desktop = current_desktop;
+    for (int i = 0; i < win_count; i++) {
+        if (windows[i]->visible && !(windows[i]->flags & WF_MINIMIZED)) {
+            windows[i]->flags |= WF_MINIMIZED;
+            wm_invalidate(windows[i]);
+        }
+    }
+}
+
+/* Restore all minimized windows */
+void wm_restore_all(void) {
+    if (!show_desktop_active) return;
+    for (int i = 0; i < win_count; i++) {
+        if (windows[i]->flags & WF_MINIMIZED) {
+            windows[i]->flags &= ~WF_MINIMIZED;
+            wm_invalidate(windows[i]);
+        }
+    }
+    show_desktop_active = 0;
+    show_desktop_prev_desktop = -1;
+}
+
+/* Virtual desktop support */
+void wm_switch_desktop(int idx) {
+    if (idx < 0 || idx >= WM_MAX_DESKTOPS || idx == current_desktop) return;
+    
+    /* Save current desktop windows */
+    desktop_win_count[current_desktop] = win_count;
+    for (int i = 0; i < win_count; i++) {
+        desktop_windows[current_desktop][i] = windows[i];
+    }
+    
+    /* Load target desktop windows */
+    current_desktop = idx;
+    win_count = desktop_win_count[current_desktop];
+    for (int i = 0; i < win_count; i++) {
+        windows[i] = desktop_windows[current_desktop][i];
+    }
+    
+    focus = NULL;
+    for (int i = win_count - 1; i >= 0; i--) {
+        if (windows[i]->visible && !(windows[i]->flags & WF_MINIMIZED)) {
+            wm_focus(windows[i]);
+            break;
+        }
+    }
+    wm_invalidate_all();
+}
+
+int wm_current_desktop(void) {
+    return current_desktop;
+}
+
+void wm_move_to_desktop(wm_window_t *w, int idx) {
+    if (!w || idx < 0 || idx >= WM_MAX_DESKTOPS || idx == current_desktop) return;
+    
+    /* Remove from current desktop */
+    for (int i = 0; i < win_count; i++) {
+        if (windows[i] == w) {
+            for (int j = i; j < win_count - 1; j++) {
+                windows[j] = windows[j + 1];
+            }
+            win_count--;
+            break;
+        }
+    }
+    
+    /* Add to target desktop */
+    if (desktop_win_count[idx] < WM_MAX_WINDOWS) {
+        desktop_windows[idx][desktop_win_count[idx]++] = w;
     }
 }

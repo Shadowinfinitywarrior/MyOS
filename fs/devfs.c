@@ -3,6 +3,7 @@
 #include "../kernel/timer.h"
 #include "../lib/string.h"
 #include "../lib/printf.h"
+#include "../drivers/framebuffer.h"
 #include "../drivers/screen.h"
 #include "../drivers/keyboard.h"
 #include "../drivers/rtc.h"
@@ -90,6 +91,33 @@ static int devuptime_read(vfs_node_t *n, uint32_t off, uint32_t sz, void *buf) {
 /* Device descriptor table. Nodes are created ONCE at devfs_init and cached:
  * vfs_resolve_path("/dev/...") must hand back a stable pointer without a
  * fresh allocation, otherwise every open/read/write leaks a node. */
+static int __attribute__((unused)) devfb_read (vfs_node_t *n, uint32_t off, uint32_t sz, void *buf) {
+    (void)n;
+    fb_info_t *fb = fb_get_info();
+    if (!fb) return 0;
+    uint32_t *back = fb_get_backbuffer();
+    if (!back) return 0;
+    size_t total_bytes = (size_t)fb->width * fb->height * fb->bpp / 8;
+    if (off >= total_bytes) return 0;
+    size_t readable = sz;
+    if (off + readable > total_bytes) readable = total_bytes - off;
+    memcpy(buf, ((uint8_t*)back) + off, readable);
+    return (int)readable;
+}
+static int __attribute__((unused)) devfb_write (vfs_node_t *n, uint32_t off, uint32_t sz, const void *buf) {
+    (void)n;
+    fb_info_t *fb = fb_get_info();
+    if (!fb) return 0;
+    uint32_t *back = fb_get_backbuffer();
+    if (!back) return 0;
+    size_t total_bytes = (size_t)fb->width * fb->height * fb->bpp / 8;
+    if (off >= total_bytes) return 0;
+    size_t writable = sz;
+    if (off + writable > total_bytes) writable = total_bytes - off;
+    memcpy(((uint8_t*)back) + off, buf, writable);
+    fb_add_damage(0, 0, fb->width, fb->height);
+    return (int)writable;
+}
 enum {
     DEV_NULL,
     DEV_ZERO,

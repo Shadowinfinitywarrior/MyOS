@@ -1,5 +1,0 @@
-# Vendored third-party single-header library (public domain, Sean Barrett).
-# graphify would otherwise map ~5000 lines of upstream code as if it were ours,
-# and it deliberately uses macro patterns tree-sitter cannot parse. Excluded on
-# purpose; the fontbake *tool* that uses it (tools/fontbake/main.c) is still indexed.
-tools/fontbake/stb_truetype.h

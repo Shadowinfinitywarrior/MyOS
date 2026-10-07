@@ -20,20 +20,70 @@
 #define SYS_BRK      13
 #define SYS_MMAP     14
 #define SYS_MUNMAP   15
-#define SYS_GETCWD   16
-#define SYS_CHDIR    17
-#define SYS_MKDIR    18
-#define SYS_UNLINK   19
-#define SYS_TIME     20
-#define SYS_GETCHAR  21
-#define SYS_PUTCHAR  22
-#define SYS_PS       23
-#define SYS_UPTIME   24
-#define SYS_EXECVE   25
-#define SYS_REBOOT   26
-#define SYS_SHUTDOWN 27
-#define SYS_MEMINFO  28
-#define SYS_READDIR  29
+#define SYS_MPROTECT 16
+#define SYS_GETCWD   17
+#define SYS_CHDIR    18
+#define SYS_MKDIR    19
+#define SYS_UNLINK   20
+#define SYS_SHMGET   21
+#define SYS_SHMCTL   22
+#define SYS_TIME     23
+#define SYS_GETCHAR  24
+#define SYS_PUTCHAR  25
+#define SYS_PS       26
+#define SYS_UPTIME   27
+#define SYS_EXECVE   28
+#define SYS_REBOOT   29
+#define SYS_SHUTDOWN 30
+#define SYS_MEMINFO  31
+#define SYS_READDIR  32
+#define SYS_GUI_CREATE_SURFACE 40
+#define SYS_GUI_BLIT_SURFACE   41
+#define SYS_GUI_INVALIDATE     42
+#define SYS_GUI_GET_FB_INFO    43
+
+/* Extended GUI syscalls for window management (Phase 4: Java/GraalVM) */
+#define SYS_GUI_INIT                  50
+#define SYS_GUI_CREATE_WINDOW         51
+#define SYS_GUI_DESTROY_WINDOW        52
+#define SYS_GUI_RENDER_FRAME          53
+#define SYS_GUI_SET_FRAMEBUFFER       54
+#define SYS_GUI_WINDOW_COUNT          55
+#define SYS_GUI_GET_WINDOW            56
+#define SYS_GUI_PUSH_KEY_EVENT        57
+#define SYS_GUI_PUSH_MOUSE_EVENT      58
+#define SYS_GUI_FOCUS_WINDOW          59
+#define SYS_GUI_SET_WINDOW_TITLE      60
+#define SYS_GUI_GET_WINDOW_RECT       61
+#define SYS_GUI_SET_WINDOW_RECT       62
+
+/* IPC/MYDP syscalls for cross-language integration */
+#define SYS_IPC_PORT_CREATE       70
+#define SYS_IPC_PORT_DESTROY      71
+#define SYS_IPC_PORT_SEND         72
+#define SYS_IPC_PORT_RECV         73
+#define SYS_IPC_PORT_FIND         74
+#define SYS_IPC_CAP_GRANT         75
+#define SYS_IPC_CAP_REVOKE        76
+#define SYS_IPC_SHM_CREATE        77
+#define SYS_IPC_SHM_ATTACH        78
+#define SYS_IPC_SHM_DETACH        79
+#define SYS_IPC_SHM_DESTROY       80
+#define SYS_IPC_EVENT_SUBSCRIBE   81
+#define SYS_IPC_EVENT_PUBLISH     82
+
+/* MYDP protocol syscalls */
+#define SYS_MYDP_CREATE_SURFACE   90
+#define SYS_MYDP_ATTACH_BUFFER    91
+#define SYS_MYDP_COMMIT           92
+#define SYS_MYDP_DAMAGE           93
+#define SYS_MYDP_CLOSE_SURFACE    94
+#define SYS_MYDP_GET_FB_INFO      95
+
+/* Signal handling syscalls */
+#define SYS_SIGACTION      100
+#define SYS_SIGRETURN      101
+#define SYS_SIGPROCMASK    102
 
 #define NUM_SYSCALLS 256
 
@@ -50,6 +100,7 @@
 
 void syscall_init(void);
 void syscall_dispatch(registers_t *regs);
+extern registers_t *g_current_regs;
 
 #endif
 

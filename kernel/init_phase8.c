@@ -23,6 +23,8 @@ extern void serial_printf(const char *fmt, ...);
 extern void gpt_init_storage(void);
 extern void screen_init(void);
 extern void screen_clear(void);
+extern void desktop_boot(void);
+extern void goshell_kernel_main(void);
 
 /* Embedded user-space programs (build/user/hello.elf, build/user/forkdemo.elf,
  * build/user/stacktrip.elf). These live in the read-only ELF sections produced
@@ -38,8 +40,48 @@ extern const uint8_t _binary_build_user_init_elf_start[];
 extern const uint8_t _binary_build_user_init_elf_end[];
 extern const uint8_t _binary_build_user_sh_elf_start[];
 extern const uint8_t _binary_build_user_sh_elf_end[];
+extern const uint8_t _binary_build_user_cat_elf_start[];
+extern const uint8_t _binary_build_user_cat_elf_end[];
+extern const uint8_t _binary_build_user_echo_elf_start[];
+extern const uint8_t _binary_build_user_echo_elf_end[];
+extern const uint8_t _binary_build_user_pwd_elf_start[];
+extern const uint8_t _binary_build_user_pwd_elf_end[];
+extern const uint8_t _binary_build_user_date_elf_start[];
+extern const uint8_t _binary_build_user_date_elf_end[];
+extern const uint8_t _binary_build_user_whoami_elf_start[];
+extern const uint8_t _binary_build_user_whoami_elf_end[];
+extern const uint8_t _binary_build_user_uname_elf_start[];
+extern const uint8_t _binary_build_user_uname_elf_end[];
+extern const uint8_t _binary_build_user_kill_elf_start[];
+extern const uint8_t _binary_build_user_kill_elf_end[];
+extern const uint8_t _binary_build_user_touch_elf_start[];
+extern const uint8_t _binary_build_user_touch_elf_end[];
+extern const uint8_t _binary_build_user_calc_elf_start[];
+extern const uint8_t _binary_build_user_calc_elf_end[];
+extern const uint8_t _binary_build_user_df_elf_start[];
+extern const uint8_t _binary_build_user_df_elf_end[];
+extern const uint8_t _binary_build_user_env_elf_start[];
+extern const uint8_t _binary_build_user_env_elf_end[];
+extern const uint8_t _binary_build_user_version_elf_start[];
+extern const uint8_t _binary_build_user_version_elf_end[];
+extern const uint8_t _binary_build_user_help_elf_start[];
+extern const uint8_t _binary_build_user_help_elf_end[];
+extern const uint8_t _binary_build_user_ls_elf_start[];
+extern const uint8_t _binary_build_user_ls_elf_end[];
+extern const uint8_t _binary_build_user_free_elf_start[];
+extern const uint8_t _binary_build_user_free_elf_end[];
+extern const uint8_t _binary_build_user_ps_elf_start[];
+extern const uint8_t _binary_build_user_ps_elf_end[];
+extern const uint8_t _binary_build_user_uptime_elf_start[];
+extern const uint8_t _binary_build_user_uptime_elf_end[];
+extern const uint8_t _binary_build_user_reboot_elf_start[];
+extern const uint8_t _binary_build_user_reboot_elf_end[];
+extern const uint8_t _binary_build_user_shutdown_elf_start[];
+extern const uint8_t _binary_build_user_shutdown_elf_end[];
 extern const uint8_t _binary_ascii_txt_start[];
 extern const uint8_t _binary_ascii_txt_end[];
+extern const uint8_t _binary_build_user_compositor_elf_start[];
+extern const uint8_t _binary_build_user_compositor_elf_end[];
 
 /* Phase 2.5 — on-demand user-program launcher. Maps a program name to its
  * embedded ELF binary and spawns it as a fresh user process. The shell `run`
@@ -64,8 +106,65 @@ void run_user_program(const char *name) {
     } else if (strcmp(name, "sh") == 0) {
         start = _binary_build_user_sh_elf_start;
         end = _binary_build_user_sh_elf_end;
+    } else if (strcmp(name, "cat") == 0) {
+        start = _binary_build_user_cat_elf_start;
+        end = _binary_build_user_cat_elf_end;
+    } else if (strcmp(name, "echo") == 0) {
+        start = _binary_build_user_echo_elf_start;
+        end = _binary_build_user_echo_elf_end;
+    } else if (strcmp(name, "pwd") == 0) {
+        start = _binary_build_user_pwd_elf_start;
+        end = _binary_build_user_pwd_elf_end;
+    } else if (strcmp(name, "date") == 0) {
+        start = _binary_build_user_date_elf_start;
+        end = _binary_build_user_date_elf_end;
+    } else if (strcmp(name, "whoami") == 0) {
+        start = _binary_build_user_whoami_elf_start;
+        end = _binary_build_user_whoami_elf_end;
+    } else if (strcmp(name, "uname") == 0) {
+        start = _binary_build_user_uname_elf_start;
+        end = _binary_build_user_uname_elf_end;
+    } else if (strcmp(name, "kill") == 0) {
+        start = _binary_build_user_kill_elf_start;
+        end = _binary_build_user_kill_elf_end;
+    } else if (strcmp(name, "touch") == 0) {
+        start = _binary_build_user_touch_elf_start;
+        end = _binary_build_user_touch_elf_end;
+    } else if (strcmp(name, "calc") == 0) {
+        start = _binary_build_user_calc_elf_start;
+        end = _binary_build_user_calc_elf_end;
+    } else if (strcmp(name, "df") == 0) {
+        start = _binary_build_user_df_elf_start;
+        end = _binary_build_user_df_elf_end;
+    } else if (strcmp(name, "env") == 0) {
+        start = _binary_build_user_env_elf_start;
+        end = _binary_build_user_env_elf_end;
+    } else if (strcmp(name, "version") == 0) {
+        start = _binary_build_user_version_elf_start;
+        end = _binary_build_user_version_elf_end;
+    } else if (strcmp(name, "help") == 0) {
+        start = _binary_build_user_help_elf_start;
+        end = _binary_build_user_help_elf_end;
+    } else if (strcmp(name, "ls") == 0) {
+        start = _binary_build_user_ls_elf_start;
+        end = _binary_build_user_ls_elf_end;
+    } else if (strcmp(name, "free") == 0) {
+        start = _binary_build_user_free_elf_start;
+        end = _binary_build_user_free_elf_end;
+    } else if (strcmp(name, "ps") == 0) {
+        start = _binary_build_user_ps_elf_start;
+        end = _binary_build_user_ps_elf_end;
+    } else if (strcmp(name, "uptime") == 0) {
+        start = _binary_build_user_uptime_elf_start;
+        end = _binary_build_user_uptime_elf_end;
+    } else if (strcmp(name, "reboot") == 0) {
+        start = _binary_build_user_reboot_elf_start;
+        end = _binary_build_user_reboot_elf_end;
+    } else if (strcmp(name, "shutdown") == 0) {
+        start = _binary_build_user_shutdown_elf_start;
+        end = _binary_build_user_shutdown_elf_end;
     } else {
-        kprintf("Unknown program '%s' (try hello, forkdemo, stacktrip, init, sh)\n",
+        kprintf("Unknown program '%s' (try hello, forkdemo, stacktrip, init, sh, cat, echo, pwd, date, whoami, uname, kill, touch, calc, df, env, version, help, ls, free, ps, uptime, reboot, shutdown)\n",
                 name);
         return;
     }
@@ -131,6 +230,7 @@ void init_phase8(void) {
 
     vfs_node_t *bin_dir = ramfs_create_dir(root, "bin");
     
+    /* Core commands */
     vfs_node_t *hello_node = ramfs_create_file(bin_dir, "hello");
     hello_node->length = (uint32_t)(_binary_build_user_hello_elf_end - _binary_build_user_hello_elf_start);
     ramfs_write(hello_node, 0, hello_node->length, _binary_build_user_hello_elf_start);
@@ -143,7 +243,87 @@ void init_phase8(void) {
     sh_node->length = (uint32_t)(_binary_build_user_sh_elf_end - _binary_build_user_sh_elf_start);
     ramfs_write(sh_node, 0, sh_node->length, _binary_build_user_sh_elf_start);
 
-    kprintf("[VFS] Populated /bin with hello, forkdemo, sh\n");
+    /* File operations */
+    vfs_node_t *cat_node = ramfs_create_file(bin_dir, "cat");
+    cat_node->length = (uint32_t)(_binary_build_user_cat_elf_end - _binary_build_user_cat_elf_start);
+    ramfs_write(cat_node, 0, cat_node->length, _binary_build_user_cat_elf_start);
+
+    vfs_node_t *echo_node = ramfs_create_file(bin_dir, "echo");
+    echo_node->length = (uint32_t)(_binary_build_user_echo_elf_end - _binary_build_user_echo_elf_start);
+    ramfs_write(echo_node, 0, echo_node->length, _binary_build_user_echo_elf_start);
+
+    vfs_node_t *pwd_node = ramfs_create_file(bin_dir, "pwd");
+    pwd_node->length = (uint32_t)(_binary_build_user_pwd_elf_end - _binary_build_user_pwd_elf_start);
+    ramfs_write(pwd_node, 0, pwd_node->length, _binary_build_user_pwd_elf_start);
+
+    vfs_node_t *touch_node = ramfs_create_file(bin_dir, "touch");
+    touch_node->length = (uint32_t)(_binary_build_user_touch_elf_end - _binary_build_user_touch_elf_start);
+    ramfs_write(touch_node, 0, touch_node->length, _binary_build_user_touch_elf_start);
+
+    vfs_node_t *ls_node = ramfs_create_file(bin_dir, "ls");
+    ls_node->length = (uint32_t)(_binary_build_user_ls_elf_end - _binary_build_user_ls_elf_start);
+    ramfs_write(ls_node, 0, ls_node->length, _binary_build_user_ls_elf_start);
+
+    /* System info */
+    vfs_node_t *date_node = ramfs_create_file(bin_dir, "date");
+    date_node->length = (uint32_t)(_binary_build_user_date_elf_end - _binary_build_user_date_elf_start);
+    ramfs_write(date_node, 0, date_node->length, _binary_build_user_date_elf_start);
+
+    vfs_node_t *whoami_node = ramfs_create_file(bin_dir, "whoami");
+    whoami_node->length = (uint32_t)(_binary_build_user_whoami_elf_end - _binary_build_user_whoami_elf_start);
+    ramfs_write(whoami_node, 0, whoami_node->length, _binary_build_user_whoami_elf_start);
+
+    vfs_node_t *uname_node = ramfs_create_file(bin_dir, "uname");
+    uname_node->length = (uint32_t)(_binary_build_user_uname_elf_end - _binary_build_user_uname_elf_start);
+    ramfs_write(uname_node, 0, uname_node->length, _binary_build_user_uname_elf_start);
+
+    vfs_node_t *version_node = ramfs_create_file(bin_dir, "version");
+    version_node->length = (uint32_t)(_binary_build_user_version_elf_end - _binary_build_user_version_elf_start);
+    ramfs_write(version_node, 0, version_node->length, _binary_build_user_version_elf_start);
+
+    /* Process management */
+    vfs_node_t *ps_node = ramfs_create_file(bin_dir, "ps");
+    ps_node->length = (uint32_t)(_binary_build_user_ps_elf_end - _binary_build_user_ps_elf_start);
+    ramfs_write(ps_node, 0, ps_node->length, _binary_build_user_ps_elf_start);
+
+    vfs_node_t *kill_node = ramfs_create_file(bin_dir, "kill");
+    kill_node->length = (uint32_t)(_binary_build_user_kill_elf_end - _binary_build_user_kill_elf_start);
+    ramfs_write(kill_node, 0, kill_node->length, _binary_build_user_kill_elf_start);
+
+    vfs_node_t *free_node = ramfs_create_file(bin_dir, "free");
+    free_node->length = (uint32_t)(_binary_build_user_free_elf_end - _binary_build_user_free_elf_start);
+    ramfs_write(free_node, 0, free_node->length, _binary_build_user_free_elf_start);
+
+    vfs_node_t *uptime_node = ramfs_create_file(bin_dir, "uptime");
+    uptime_node->length = (uint32_t)(_binary_build_user_uptime_elf_end - _binary_build_user_uptime_elf_start);
+    ramfs_write(uptime_node, 0, uptime_node->length, _binary_build_user_uptime_elf_start);
+
+    /* Utilities */
+    vfs_node_t *calc_node = ramfs_create_file(bin_dir, "calc");
+    calc_node->length = (uint32_t)(_binary_build_user_calc_elf_end - _binary_build_user_calc_elf_start);
+    ramfs_write(calc_node, 0, calc_node->length, _binary_build_user_calc_elf_start);
+
+    vfs_node_t *df_node = ramfs_create_file(bin_dir, "df");
+    df_node->length = (uint32_t)(_binary_build_user_df_elf_end - _binary_build_user_df_elf_start);
+    ramfs_write(df_node, 0, df_node->length, _binary_build_user_df_elf_start);
+
+    vfs_node_t *env_node = ramfs_create_file(bin_dir, "env");
+    env_node->length = (uint32_t)(_binary_build_user_env_elf_end - _binary_build_user_env_elf_start);
+    ramfs_write(env_node, 0, env_node->length, _binary_build_user_env_elf_start);
+
+    vfs_node_t *help_node = ramfs_create_file(bin_dir, "help");
+    help_node->length = (uint32_t)(_binary_build_user_help_elf_end - _binary_build_user_help_elf_start);
+    ramfs_write(help_node, 0, help_node->length, _binary_build_user_help_elf_start);
+
+    vfs_node_t *reboot_node = ramfs_create_file(bin_dir, "reboot");
+    reboot_node->length = (uint32_t)(_binary_build_user_reboot_elf_end - _binary_build_user_reboot_elf_start);
+    ramfs_write(reboot_node, 0, reboot_node->length, _binary_build_user_reboot_elf_start);
+
+    vfs_node_t *shutdown_node = ramfs_create_file(bin_dir, "shutdown");
+    shutdown_node->length = (uint32_t)(_binary_build_user_shutdown_elf_end - _binary_build_user_shutdown_elf_start);
+    ramfs_write(shutdown_node, 0, shutdown_node->length, _binary_build_user_shutdown_elf_start);
+
+    kprintf("[VFS] Populated /bin with hello, forkdemo, sh, cat, echo, pwd, touch, ls, date, whoami, uname, version, ps, kill, free, uptime, calc, df, env, help, reboot, shutdown\n");
 
     kprintf("[PHASE8] Spawning embedded init as fallback\n");
     process_create_user("init",
@@ -169,7 +349,23 @@ void init_phase8(void) {
      * if there is no usable framebuffer it returns immediately and the text
      * console continues as before. */
     {
-        extern void desktop_boot(void);
-        desktop_boot();
+        extern const uint8_t _binary_build_user_compositor_elf_start[];
+        extern const uint8_t _binary_build_user_compositor_elf_end[];
+        process_create_user("compositor", _binary_build_user_compositor_elf_start,
+                            (uint64_t)(_binary_build_user_compositor_elf_end -
+                                       _binary_build_user_compositor_elf_start));
     }
+
+    /* Spawn Go/C shell (Phase 3 desktop shell) - embedded ELF - DISABLED for Phase 2 */
+    /*
+    {
+        extern const uint8_t _binary_build_user_goshell_embed_o_start[];
+        extern const uint8_t _binary_build_user_goshell_embed_o_end[];
+        process_create_user("goshell", _binary_build_user_goshell_embed_o_start,
+                            (uint64_t)(_binary_build_user_goshell_embed_o_end -
+                                       _binary_build_user_goshell_embed_o_start));
+    }
+    */
+
+    desktop_boot();
 }

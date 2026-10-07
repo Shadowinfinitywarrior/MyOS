@@ -148,6 +148,19 @@ fork_child_iret:
     iretq
 
 ; ==========================================
+; sigreturn_trampoline
+;   User-mode trampoline for sigreturn syscall.
+;   Called with RSP pointing to saved registers_t frame.
+;   Invokes SYS_SIGRETURN and restores user context.
+; ==========================================
+global sigreturn_trampoline
+sigreturn_trampoline:
+    mov rax, 101        ; SYS_SIGRETURN
+    syscall
+    ; Should not return
+    hlt
+
+; ==========================================
 ; syscall_entry64
 ;   Fast path for the SYSCALL instruction.
 ;   On entry (from Ring 3):

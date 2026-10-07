@@ -6,7 +6,9 @@ build/gui/desktop.o: gui/desktop.c gui/desktop.h gui/wm.h gui/surface.h \
  gui/../kernel/process.h gui/../kernel/../include/system.h \
  gui/../kernel/../include/types.h gui/../kernel/paging.h \
  gui/../drivers/framebuffer.h gui/../drivers/../include/types.h \
- gui/../drivers/rtc.h gui/../drivers/../include/system.h
+ gui/../drivers/rtc.h gui/../drivers/../include/system.h \
+ gui/../drivers/keyboard.h gui/../include/rust_gui.h include/stdint.h \
+ gui/../include/../gui/rect.h gui/../include/../gui/surface.h
 gui/desktop.h:
 gui/wm.h:
 gui/surface.h:
@@ -34,3 +36,8 @@ gui/../drivers/framebuffer.h:
 gui/../drivers/../include/types.h:
 gui/../drivers/rtc.h:
 gui/../drivers/../include/system.h:
+gui/../drivers/keyboard.h:
+gui/../include/rust_gui.h:
+include/stdint.h:
+gui/../include/../gui/rect.h:
+gui/../include/../gui/surface.h:

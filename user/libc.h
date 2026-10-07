@@ -2,8 +2,6 @@
 #define USER_LIBC_H
 #include "../include/system.h"
 
-typedef int pid_t;
-
 /* errno values (user side) — must match kernel/syscall.h */
 #define EPERM   1
 #define ENOENT  2
@@ -25,23 +23,44 @@ extern int errno;
 #define SYS_OPEN     5
 #define SYS_CLOSE    6
 #define SYS_WAIT     7
-#define SYS_KILL     12
+#define SYS_EXEC     8
 #define SYS_GETPID   9
 #define SYS_SLEEP    10
 #define SYS_YIELD    11
-#define SYS_PUTCHAR  22
-#define SYS_GETCHAR  21
-#define SYS_PS       23
-#define SYS_UPTIME   24
-#define SYS_EXECVE   25
-#define SYS_REBOOT   26
-#define SYS_SHUTDOWN 27
-#define SYS_MEMINFO  28
-#define SYS_READDIR  29
+#define SYS_KILL     12
+#define SYS_BRK      13
+#define SYS_MMAP     14
+#define SYS_MUNMAP   15
+#define SYS_MPROTECT 16
+#define SYS_GETCWD   17
+#define SYS_CHDIR    18
+#define SYS_MKDIR    19
+#define SYS_UNLINK   20
+#define SYS_SHMGET   21
+#define SYS_SHMCTL   22
+#define SYS_TIME     23
+#define SYS_GETCHAR  24
+#define SYS_PUTCHAR  25
+#define SYS_PS       26
+#define SYS_UPTIME   27
+#define SYS_EXECVE   28
+#define SYS_REBOOT   29
+#define SYS_SHUTDOWN 30
+#define SYS_MEMINFO  31
+#define SYS_READDIR  32
+#define SYS_GUI_CREATE_SURFACE 40
+#define SYS_GUI_BLIT_SURFACE   41
+#define SYS_GUI_INVALIDATE     42
+#define SYS_GUI_GET_FB_INFO    43
+
+/* Signal handling syscalls */
+#define SYS_SIGACTION      100
+#define SYS_SIGRETURN      101
+#define SYS_SIGPROCMASK    102
 
 /* Syscall wrapper (SYSCALL instruction, SysV argument slots).
  * Returns -1 and sets errno on negative-errno results. */
-long _syscall(long num, long a1, long a2, long a3, long a4, long a5);
+long _syscall(long num, long a1, long a2, long a3, long a4, long a5, long a6);
 
 /* Standard functions */
 void exit(int code);
@@ -64,6 +83,64 @@ void sleep_ms(unsigned int ms);
 void yield(void);
 void putchar(char c);
 char getchar(void);
+
+/* Memory mapping */
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+int munmap(void *addr, size_t length);
+int mprotect(void *addr, size_t length, int prot);
+
+/* Shared memory */
+#define SHM_RDONLY 0x01
+#define SHM_RND    0x02
+int shmget(const char *name, size_t size, int flags);
+int shmctl(int fd, int cmd, void *arg);
+
+/* Signal handling - types and constants from kernel types.h */
+#define SIGHUP     1
+#define SIGINT     2
+#define SIGQUIT    3
+#define SIGILL     4
+#define SIGTRAP    5
+#define SIGABRT    6
+#define SIGBUS     7
+#define SIGFPE     8
+#define SIGKILL    9
+#define SIGUSR1    10
+#define SIGSEGV    11
+#define SIGUSR2    12
+#define SIGPIPE    13
+#define SIGALRM    14
+#define SIGTERM    15
+#define SIGCHLD    17
+#define SIGCONT    18
+#define SIGSTOP    19
+
+#define NSIGNALS   32
+
+#define SIG_DFL    ((void *)0)
+#define SIG_IGN    ((void *)1)
+
+#define SA_NOCLDSTOP  0x00000001
+#define SA_NOCLDWAIT  0x00000002
+#define SA_SIGINFO    0x00000004
+#define SA_ONSTACK    0x00000008
+#define SA_RESTART    0x00000010
+#define SA_NODEFER    0x00000020
+#define SA_RESETHAND  0x00000040
+#define SA_NOMASK     SA_NODEFER
+#define SA_ONESHOT    SA_RESETHAND
+
+#define SIG_BLOCK     0
+#define SIG_UNBLOCK   1
+#define SIG_SETMASK   2
+
+typedef void (*sighandler_t)(int);
+
+/* siginfo_t, sigaction structures defined in kernel types.h */
+typedef void (*sigaction_handler_t)(int, siginfo_t *, void *);
+
+int sigaction(int signum, const struct sigaction *act, struct sigaction *oldact);
+int sigprocmask(int how, const uint32_t *set, uint32_t *oldset);
 
 /* String functions (self-contained) */
 size_t strlen(const char *s);
@@ -88,4 +165,3 @@ int printf(const char *fmt, ...);
 int snprintf(char *str, size_t size, const char *format, ...);
 
 #endif
-

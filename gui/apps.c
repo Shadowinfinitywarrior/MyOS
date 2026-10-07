@@ -17,11 +17,11 @@
 
 /* A titled "card" panel inside a window, used by the info apps. */
 static void panel(surface_t *s, const rect_t *area, const char *title) {
-    surface_rounded_fill(s, area, 8, TH_WIN_BG);
-    surface_rounded_outline(s, area, 8, TH_BORDER, 1);
-    rect_t hdr = { area->x, area->y, area->w, 26 };
-    surface_fill_rect(s, &hdr, TH_TITLE);
-    text_draw(s, font_bold(), area->x + 12, area->y + 6, title, TH_TITLE_TEXT);
+    surface_rounded_fill(s, area, 8, RGB(0x1B, 0x20, 0x28));
+    surface_rounded_outline(s, area, 8, RGB(0x30, 0x36, 0x3D), 1);
+    rect_t hdr = { area->x + 1, area->y + 1, area->w - 2, 28 };
+    surface_rounded_fill(s, &hdr, 7, RGB(0x21, 0x27, 0x33));
+    text_draw(s, font_bold(), area->x + 12, area->y + 7, title, TH_TITLE_TEXT);
 }
 
 static int kv_line(surface_t *s, int y, const char *k, const char *v, int x, int w) {
@@ -160,34 +160,47 @@ void app_open_files(void) {
 
 static void about_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     (void)w;
-    surface_fill_rect(s, c, TH_WIN_BG_FOCUS);
+    surface_fill_rect(s, c, TH_WIN_BG);
 
-    /* Header band with the product name. */
+    /* Header band with product name and glowing badge */
     rect_t band = { c->x, c->y, c->w, 86 };
-    surface_gradient_v(s, &band, TH_ACCENT_DEEP, TH_ACCENT_SOFT);
-    text_draw(s, font_bold(), c->x + 24, c->y + 22, "MyOS", TH_TEXT_BRIGHT);
-    text_draw(s, font_ui(), c->x + 24, c->y + 48, "A 64-bit operating system", TH_TEXT);
+    surface_gradient_v(s, &band, RGB(0x24, 0x33, 0x50), RGB(0x14, 0x1B, 0x26));
+    rect_t band_line = { c->x, c->y + 85, c->w, 1 };
+    surface_fill_rect(s, &band_line, RGB(0x30, 0x38, 0x48));
 
-    int y = c->y + 104;
-    rect_t p1 = { c->x + 20, y, c->w - 40, 128 };
-    panel(s, &p1, "System");
+    /* Modern logo icon badge */
+    rect_t badge = { c->x + 18, c->y + 18, 48, 48 };
+    surface_rounded_fill(s, &badge, 12, RGB(0x38, 0x8B, 0xFD));
+    surface_rounded_outline(s, &badge, 12, RGB(0x79, 0xB8, 0xFF), 1);
+    /* Atom / shield symbol */
+    rect_t inner = { c->x + 32, c->y + 32, 20, 20 };
+    surface_rounded_fill(s, &inner, 10, RGB(0xFF, 0xFF, 0xFF));
+    rect_t core = { c->x + 38, c->y + 38, 8, 8 };
+    surface_rounded_fill(s, &core, 4, RGB(0x1F, 0x6F, 0xEB));
+
+    text_draw(s, font_bold(), c->x + 76, c->y + 22, "MyOS Modern Desktop", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), c->x + 76, c->y + 46, "64-bit Unix OS • Multi-Language GUI", TH_TITLE_TEXT_DIM);
+
+    int y = c->y + 102;
+    rect_t p1 = { c->x + 16, y, c->w - 32, 134 };
+    panel(s, &p1, "System Information");
     y = p1.y + 36;
-    y = kv_line(s, y, "Architecture", "x86-64", p1.x + 16, p1.w - 32);
-    y = kv_line(s, y, "Kernel", "ring 0, 4-level paging", p1.x + 16, p1.w - 32);
-    y = kv_line(s, y, "Memory space", "higher-half, NX + SMEP", p1.x + 16, p1.w - 32);
-    y = kv_line(s, y, "Display", "1024x768x32 framebuffer", p1.x + 16, p1.w - 32);
+    y = kv_line(s, y, "Architecture", "x86-64 Long Mode", p1.x + 14, p1.w - 28);
+    y = kv_line(s, y, "Kernel", "SMP Preemptive Ring 0", p1.x + 14, p1.w - 28);
+    y = kv_line(s, y, "Memory Space", "Higher-Half Paged", p1.x + 14, p1.w - 28);
+    y = kv_line(s, y, "Display Engine", "1024x768 32bpp", p1.x + 14, p1.w - 28);
 
-    y = p1.y + p1.h + 16;
-    rect_t p2 = { c->x + 20, y, c->w - 40, 92 };
-    panel(s, &p2, "Built with");
+    y = p1.y + p1.h + 14;
+    rect_t p2 = { c->x + 16, y, c->w - 32, 114 };
+    panel(s, &p2, "Modern Architecture");
     y = p2.y + 36;
-    y = kv_line(s, y, "Toolchain", "GCC + NASM + GNU ld", p2.x + 16, p2.w - 32);
-    y = kv_line(s, y, "Graphics", "software compositor, damage-tracked", p2.x + 16, p2.w - 32);
-    y = kv_line(s, y, "Terminals", "virtual TTYs, ANSI colour", p2.x + 16, p2.w - 32);
+    y = kv_line(s, y, "Core Compositor", "Rust Bare-Metal", p2.x + 14, p2.w - 28);
+    y = kv_line(s, y, "Desktop Shell", "Go / C Window Manager", p2.x + 14, p2.w - 28);
+    y = kv_line(s, y, "App Runtimes", "Java & Python", p2.x + 14, p2.w - 28);
 }
 
 void app_open_about(void) {
-    wm_window_t *w = wm_create("About MyOS", 300, 200, 460, 400);
+    wm_window_t *w = wm_create("About MyOS", 612, 55, 400, 460);
     if (!w) return;
     w->paint = about_paint;
 }

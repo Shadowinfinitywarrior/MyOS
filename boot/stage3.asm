@@ -14,31 +14,42 @@ start:
     mov sp, 0xA000
     sti
 
+    ; Enable A20 line
+    in al, 0x92
+    or al, 2
+    out 0x92, al
+
+    ; Enter Unreal Mode to give FS a 4GB segment limit in real mode
+    lgdt [unreal_gdt_desc]
+    cli
+    mov eax, cr0
+    or al, 1
+    mov cr0, eax
+    jmp $+2
+    mov bx, 0x08
+    mov fs, bx
+    and al, 0xFE
+    mov cr0, eax
+    jmp $+2
+    sti
+
     ; Reset the disk controller before the first read.
     mov ah, 0
     mov dl, 0x80
     int 0x13
 
-    ; Setup DAP for 8-sector reads to fill kernel
+    ; Setup DAP for 32-sector (16 KB) reads to low staging buffer at 0x2000:0 = 0x20000
     mov byte [0x7e20], 16
     mov byte [0x7e20+1], 0
-    mov word [0x7e20+2], 8
-    mov word [0x7e20+4], 0x0000 ; Offset always 0
+    mov word [0x7e20+2], 32        ; 32 sectors = 16 KB per read
+    mov word [0x7e20+4], 0x0000    ; Offset 0
+    mov word [0x7e20+6], 0x2000    ; Segment 0x2000 -> physical 0x20000
     mov dword [0x7e20+12], 0
-    ; Stage from 0x20000 instead of 0x77E0 and widen the window. The old
-    ; values capped the kernel at 400 sectors (200 KB); once the image grew
-    ; past that the tail (banner + embedded user ELFs) was never loaded and
-    ; the boot silently degraded. 0x20000 stays clear of the boot sector
-    ; (0x7C00), stage2/3 (0x8000/0x9000), the DAP (0x7e20) and the E820 map
-    ; (0x5000), and 120*8 sectors = 480 KB keeps the top at 0x98000, still
-    ; clear of the EBDA at 0x9FC00. Keep generous headroom here: this window
-    ; silently truncating the kernel is a nasty failure mode, because the boot
-    ; still succeeds and only the tail of the image is missing.
-    mov ax, 0x2000 ; Starting Segment = 0x2000:0 = 0x20000
-    mov ebx, 66
-    mov ecx, 120   ; 120 loops * 8 sectors = 960 sectors (480 KB)
+
+    mov ebx, 66                    ; Starting LBA sector (kernel on disk)
+    mov edi, 0x100000              ; Target physical memory: 1 MB
+    mov ecx, 128                   ; 128 loops * 16 KB = 2048 KB (2 MB max kernel)
 .read_loop:
-    mov word [0x7e20+6], ax
     mov dword [0x7e20+8], ebx
     pusha
     mov dl, 0x80
@@ -47,19 +58,25 @@ start:
     int 0x13
     popa
     jc hang
-    add ax, 0x0100 ; Increment segment by 4096 bytes
-    add ebx, 8
+
+    ; Copy 16 KB chunk from low memory staging buffer (0x20000) to fs:[edi] (>= 1MB)
+    push ecx
+    mov esi, 0x20000
+    mov ecx, 4096                  ; 4096 dwords = 16 KB
+.copy_chunk:
+    mov eax, [esi]
+    mov [fs:edi], eax
+    add esi, 4
+    add edi, 4
+    dec ecx
+    jnz .copy_chunk
+    pop ecx
+
+    add ebx, 32
     dec ecx
     jnz .read_loop
 
-    jmp a20
-
 a20:
-    ; Debug entering a20
-    ; Enable A20
-    in al, 0x92
-    or al, 2
-    out 0x92, al
 
     ; --- E820 memory map ---
     xor ebx, ebx
@@ -101,6 +118,22 @@ hang:
     cli
     hlt
     jmp hang
+
+align 4
+unreal_gdt:
+    dq 0
+    ; 32-bit flat data descriptor (base 0, limit 4GB, RW)
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 0x92
+    db 0xCF
+    db 0x00
+unreal_gdt_end:
+
+unreal_gdt_desc:
+    dw unreal_gdt_end - unreal_gdt - 1
+    dd unreal_gdt
 
 bits 32
 pm_start:
@@ -203,14 +236,8 @@ long_mode:
     mov gs, ax
     mov ss, ax
     mov rsp, 0x900000
-    ; Verify source loaded
-    ; Copy kernel from low memory 0x20000 to 0x100000
-    mov rsi, 0x20000
-    mov rdi, 0x100000
-    mov rcx, 0x78000     ; 480 KB, matching the read loop above
-    cld
-    rep movsb
-    ; Verify first byte copied
+    ; Kernel was already loaded directly to 0x100000 in Unreal Mode
+
 
     ; Call kernel at 0x100000 (call pushes 8 bytes, aligning stack for ABI)
     mov rax, 0x100000

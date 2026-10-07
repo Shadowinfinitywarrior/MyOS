@@ -4,6 +4,7 @@
 #include "../include/types.h"
 #include "../lib/printf.h"
 #include "../kernel/timer.h"
+#include "../include/rust_gui.h"
 #pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
 #pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
 
@@ -329,6 +330,15 @@ static void keyboard_queue_event(uint16_t keycode, char ascii, key_event_type_t 
         keyboard_queue[keyboard_queue_head].extended = extended;
         keyboard_queue_head = next;
     }
+    
+    /* Also push to Rust GUI event queue */
+    uint8_t rust_type = 0;
+    switch (type) {
+        case KEY_EVENT_DOWN: rust_type = 1; break;
+        case KEY_EVENT_UP: rust_type = 2; break;
+        case KEY_EVENT_REPEAT: rust_type = 3; break;
+    }
+    rust_gui_push_key_event(rust_type, (uint8_t)(keycode & 0xFF), (uint8_t)ascii, keyboard_modifiers);
 }
 
 /* USB HID entry point: push a keycode into the same event queue the PS/2 path

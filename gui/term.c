@@ -199,7 +199,7 @@ static void term_service(void) {
 }
 
 wm_window_t *term_open(const char *title) {
-    wm_window_t *w = wm_create(title, 120, 90, 720, 460);
+    wm_window_t *w = wm_create(title, 112, 55, 490, 460);
     if (!w) return NULL;
     term_window_t *t = kzalloc(sizeof(term_window_t));
     if (!t) { wm_destroy(w); return NULL; }
@@ -218,12 +218,8 @@ wm_window_t *term_open_shell(void) {
     vtty_t *v = term_vty_of(w);
     if (!v) { wm_destroy(w); return NULL; }
 
-    /* A greeting so an empty window is never mistaken for a hang. */
-    vtty_puts(v, "\x1b[1;36mMyOS\x1b[0m graphical terminal\r\n");
-    vtty_puts(v, "This window is a real VT100 terminal. The shell below is a\r\n");
-    vtty_puts(v, "ring-3 process; try \x1b[1;33mhelp\x1b[0m, \x1b[1;33mls\x1b[0m, ");
-    vtty_puts(v, "\x1b[1;33mps\x1b[0m, \x1b[1;33mfree\x1b[0m, \x1b[1;33mrun hello\x1b[0m.\r\n");
-    vtty_puts(v, "Type \x1b[1;33mexit\x1b[0m and the window closes.\r\n\r\n");
+    /* Minimal terminal session indicator */
+    vtty_puts(v, "\x1b[90m─ Terminal session ready (VT100) ─\x1b[0m\r\n\r\n");
 
     /* Spawn the real shell and bind it to this window's vty, so its output
      * lands here and its input comes from this window's keyboard. */

@@ -1,0 +1,107 @@
+/*
+ * MicroPython port configuration for MyOS
+ * Bare-metal configuration for x86_64
+ */
+
+#ifndef MICROPY_CONFIGPORT_H
+#define MICROPY_CONFIGPORT_H
+
+// This port is for x86_64 bare-metal MyOS
+#define MICROPY_PY_BUILTINS_STR_UNICODE (1)
+#define MICROPY_PY_BUILTINS_BYTEARRAY (1)
+#define MICROPY_PY_BUILTINS_MEMORYVIEW (1)
+#define MICROPY_PY_BUILTINS_FROZENSET (1)
+#define MICROPY_PY_BUILTINS_SET (1)
+#define MICROPY_PY_BUILTINS_SLICE (1)
+#define MICROPY_PY_BUILTINS_PROPERTY (1)
+#define MICROPY_PY_BUILTINS_MIN_MAX (1)
+#define MICROPY_PY_BUILTINS_POW3 (1)
+#define MICROPY_PY_BUILTINS_HELP (0)
+#define MICROPY_PY_BUILTINS_HELP_TEXT (0)
+#define MICROPY_PY_BUILTINS_HELP_MODULES (0)
+
+// Memory management
+#define MICROPY_GC_ALLOC_THRESHOLD (0)
+#define MICROPY_GC_SPLIT_HEAP (0)
+#define MICROPY_GC_CONSERVATIVE_CLEAR (1)
+#define MICROPY_MEM_STATS (0)
+
+// Unicode support
+#define MICROPY_PY_UJSON (1)
+#define MICROPY_PY_UCTYPES (1)
+#define MICROPY_PY_UZLIB (1)
+#define MICROPY_PY_UHASHLIB (1)
+#define MICROPY_PY_UBINASCII (1)
+#define MICROPY_PY_UHEAPQ (1)
+#define MICROPY_PY_UARRAY (1)
+#define MICROPY_PY_UCOLLECTIONS (1)
+#define MICROPY_PY_UITERTOOLS (1)
+#define MICROPY_PY_UFUNCTOOLS (1)
+#define MICROPY_PY_UMATH (1)
+#define MICROPY_PY_URANDOM (1)
+#define MICROPY_PY_USELECT (0)
+#define MICROPY_PY_USOCKET (0)
+#define MICROPY_PY_USSL (0)
+#define MICROPY_PY_UERRNO (1)
+#define MICROPY_PY_UHASHLIB (1)
+#define MICROPY_PY_UOS (1)
+#define MICROPY_PY_UTIME (1)
+#define MICROPY_PY_UTIME_MP_HAL (1)
+#define MICROPY_PY_MACHINE (0)
+#define MICROPY_PY_MICROPYTHON_MEM_INFO (1)
+
+// No threading support in bare-metal
+#define MICROPY_PY_THREAD (0)
+#define MICROPY_PY_THREAD_GIL (0)
+#define MICROPY_PY_THREAD_GIL_VM_DIVISOR (0)
+
+// No file system by default
+#define MICROPY_VFS (0)
+#define MICROPY_VFS_FAT (0)
+#define MICROPY_VFS_LFS2 (0)
+
+// Minimal I/O
+#define MICROPY_PY_IO (1)
+#define MICROPY_PY_IO_FILEIO (0)
+#define MICROPY_PY_IO_BYTESIO (1)
+#define MICROPY_PY_IO_STRINGIO (1)
+
+// Built-in modules
+#define MICROPY_MODULE_WEAK_LINKS (1)
+#define MICROPY_MODULE_FROZEN (1)
+#define MICROPY_MODULE_FROZEN_MPY (1)
+#define MICROPY_MODULE_FROZEN_STR (1)
+
+// Exception handling
+#define MICROPY_PY_SYS_EXC_INFO (1)
+#define MICROPY_PY_SYS_EXIT (1)
+#define MICROPY_PY_SYS_STDFILES (1)
+#define MICROPY_PY_SYS_STDOUT (1)
+#define MICROPY_PY_SYS_STDIN (1)
+#define MICROPY_PY_SYS_STDERR (1)
+#define MICROPY_PY_SYS_PLATFORM "myos"
+#define MICROPY_PY_SYS_VERSION "3.4.0"
+#define MICROPY_PY_SYS_IMPLEMENTATION_NAME "micropython"
+#define MICROPY_PY_SYS_IMPLEMENTATION_VERSION (1, 20, 0)
+
+// No OS module (we provide our own pymyos module)
+#define MICROPY_PY_UOS_DUPTERM (0)
+#define MICROPY_PY_UOS_SYNC (0)
+
+// Math
+#define MICROPY_FLOAT_IMPL (MICROPY_FLOAT_IMPL_FLOAT)
+#define MICROPY_PY_MATH (1)
+#define MICROPY_PY_CMATH (0)
+
+// No struct module
+#define MICROPY_PY_USTRUCT (1)
+
+// Optimizations
+#define MICROPY_OPT_COMPUTED_GOTO (1)
+#define MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE (1)
+#define MICROPY_OPT_MPZ_BITWISE (1)
+
+// Enable our custom module
+#define MODULE_PYMYOS_ENABLED (1)
+
+#endif // MICROPY_CONFIGPORT_H

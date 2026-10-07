@@ -22,24 +22,19 @@ int main(void) {
     char input[MAX_INPUT];
     char *argv[MAX_ARGS];
 
-    /* Banner: the same art the boot splash prints from ascii.txt, so the shell
-     * and the serial console greet identically. Copied verbatim from that file
-     * (keep the two in sync when it changes). These are UTF-8 block elements,
-     * U+2588/U+2591, so they need a cell to hold a codepoint rather than a
-     * byte - see vtty_cell_t.ch and font_blocks(). */
-    puts("░███     ░███              ░██████     ░██████");
-    puts("░████   ░████             ░██   ░██   ░██   ░██");
-    puts("░██░██ ░██░██ ░██    ░██ ░██     ░██ ░██");
-    puts("░██ ░████ ░██ ░██    ░██ ░██     ░██  ░████████");
-    puts("░██  ░██  ░██ ░██    ░██ ░██     ░██         ░██");
-    puts("░██       ░██ ░██   ░███  ░██   ░██   ░██   ░██");
-    puts("░██       ░██  ░█████░██   ░██████     ░██████");
-    puts("                     ░██");
-    puts("               ░███████");
+    /* Fastfetch-style modern system banner */
+    puts("\x1b[1;36m    __  ___      ____  _____ \x1b[0m   \x1b[1;37mMyOS 1.0\x1b[0m (x86-64)");
+    puts("\x1b[1;36m   /  |/  /_  __/ __ \\/ ___/ \x1b[0m   Kernel:  v1.0 (SMP)");
+    puts("\x1b[1;34m  / /|_/ / / / / / / /\\__ \\  \x1b[0m   Shell:   myos-sh v1.2");
+    puts("\x1b[1;34m / /  / / /_/ / /_/ /___/ /  \x1b[0m   Display: 1024x768 32bpp");
+    puts("\x1b[1;35m/_/  /_/\\__, /\\____//____/   \x1b[0m   Memory:  64 MB RAM");
+    puts("\x1b[1;35m       /____/                \x1b[0m   Uptime:  Active");
+    puts("");
+    puts(" Type \x1b[1;32mhelp\x1b[0m for commands, or launch apps from the dock.");
     puts("");
 
     while (1) {
-        write(1, "myos> ", 6);
+        write(1, "\x1b[1;36mmyos\x1b[0m \x1b[1;34m>\x1b[0m ", 19);
         
         int n = read(0, input, MAX_INPUT - 1);
         if (n <= 0) continue;

@@ -1,0 +1,36 @@
+[
+  {
+    "name": "toolkit.Window",
+    "methods": [
+      { "name": "createNativeWindow", "parameterTypes": [], "returnType": "void" },
+      { "name": "destroyNativeWindow", "parameterTypes": [], "returnType": "void" },
+      { "name": "updateNativeWindow", "parameterTypes": [], "returnType": "void" }
+    ]
+  },
+  {
+    "name": "myos.binding.NativeGUI",
+    "methods": [
+      { "name": "init", "parameterTypes": ["int", "int"], "returnType": "int" },
+      { "name": "createWindow", "parameterTypes": ["java.lang.String", "int", "int", "int", "int"], "returnType": "long" },
+      { "name": "destroyWindow", "parameterTypes": ["long"], "returnType": "void" },
+      { "name": "invalidateWindow", "parameterTypes": ["long"], "returnType": "void" },
+      { "name": "renderFrame", "parameterTypes": [], "returnType": "int" },
+      { "name": "setFramebuffer", "parameterTypes": ["long", "int", "int", "int"], "returnType": "void" },
+      { "name": "windowCount", "parameterTypes": [], "returnType": "int" },
+      { "name": "getWindow", "parameterTypes": ["int"], "returnType": "myos.binding.NativeGUI$Window" },
+      { "name": "focusWindow", "parameterTypes": ["long"], "returnType": "boolean" },
+      { "name": "setWindowTitle", "parameterTypes": ["long", "java.lang.String"], "returnType": "void" },
+      { "name": "getWindowRect", "parameterTypes": ["long", "myos.binding.NativeGUI$Rect"], "returnType": "boolean" },
+      { "name": "setWindowRect", "parameterTypes": ["long", "myos.binding.NativeGUI$Rect"], "returnType": "boolean" },
+      { "name": "pushKeyEvent", "parameterTypes": ["byte", "byte", "byte", "int"], "returnType": "void" },
+      { "name": "pushMouseEvent", "parameterTypes": ["byte", "int", "int", "byte", "int"], "returnType": "void" }
+    ]
+  },
+  {
+    "name": "myos.binding.Syscall",
+    "methods": [
+      { "name": "syscall", "parameterTypes": ["int", "long", "long", "long", "long", "long", "long"], "returnType": "long" },
+      { "name": "toCString", "parameterTypes": ["java.lang.String"], "returnType": "long" }
+    ]
+  }
+]

@@ -2,49 +2,48 @@
 #include "theme.h"
 #include "../drivers/framebuffer.h"
 
-/* Cursor bitmaps: 1 = ink, 2 = outline/shadow, 0 = transparent. Keeping them
- * as small string art makes the shapes readable and editable. */
+/* Cursor bitmaps: '#' = black outline, '*' = solid white body, '.' = transparent. */
 static const char *arrow_shape[CURSOR_H] = {
-    "X...........",
-    "XX..........",
-    "X.X.........",
-    "X..X........",
-    "X...X.......",
-    "X....X......",
-    "X.....X.....",
-    "X......X....",
-    "X.......X...",
-    "X........X..",
-    "X.....XXXXX.",
-    "X..X..X.....",
-    "X.X.X..X....",
-    "XX..X..X....",
-    "X...X..X....",
-    "....X..X....",
-    "...X...X....",
-    "..X....X....",
-    ".X..........",
+    "#...........",
+    "##..........",
+    "#*#.........",
+    "#**#........",
+    "#***#.......",
+    "#****#......",
+    "#*****#.....",
+    "#******#....",
+    "#*******#...",
+    "#********#..",
+    "#*****####..",
+    "#**#**#.....",
+    "#*#.#**#....",
+    "##..#**#....",
+    "#....#**#...",
+    ".....#**#...",
+    "......##....",
+    "............",
+    "............",
 };
 
 static const char *hand_shape[CURSOR_H] = {
-    "....XX......",
-    "...X..X..X..",
-    "...X..X..X..",
-    "...X..X..X..",
-    "...X..X..X..",
-    "...XXXXXXX..",
-    "..X..X..XX..",
-    "..X..X..X.X.",
-    "..XXXXXX.XX.",
-    "...X..X..XX.",
-    "...X..X..X..",
-    "...X..X..X..",
-    "...X..X..X..",
-    "...X..X..X..",
-    "..XX..XX.X..",
-    "..X.....X...",
-    "..X.....X...",
-    ".XX.....XX..",
+    "....##......",
+    "...#**#..#..",
+    "...#**#.#*#.",
+    "...#**#.#*#.",
+    "...#**#.#*#.",
+    "...#*******#",
+    "..#********#",
+    "..#********#",
+    "..#********#",
+    "...#*******#",
+    "...#*******#",
+    "...#*******#",
+    "...#*******#",
+    "...#*******#",
+    "..##*******#",
+    "..#********#",
+    "..#********#",
+    ".##********#",
     "............",
 };
 
@@ -211,17 +210,24 @@ void cursor_draw(void) {
 
     const char **map = shape_for(shape);
 
-    /* Shadow first, offset down-right, so the arrow reads on any background. */
+    /* Shadow first, offset down-right, so the pointer reads cleanly on any background. */
     for (int row = 0; row < CURSOR_H; row++) {
         for (int col = 0; col < CURSOR_W; col++) {
-            if (map[row][col] != 'X') continue;
-            put(x + col + 2, y + row + 2, RGB(0x00, 0x00, 0x00), bb, stride);
+            char ch = map[row][col];
+            if (ch == '#' || ch == '*' || ch == 'X') {
+                put(x + col + 1, y + row + 2, RGB(0x05, 0x07, 0x0C), bb, stride);
+            }
         }
     }
+    /* Draw outline and solid body */
     for (int row = 0; row < CURSOR_H; row++) {
         for (int col = 0; col < CURSOR_W; col++) {
-            if (map[row][col] != 'X') continue;
-            put(x + col, y + row, RGB(0xFF, 0xFF, 0xFF), bb, stride);
+            char ch = map[row][col];
+            if (ch == '#' || ch == 'X') {
+                put(x + col, y + row, RGB(0x10, 0x14, 0x1E), bb, stride);
+            } else if (ch == '*') {
+                put(x + col, y + row, RGB(0xFF, 0xFF, 0xFF), bb, stride);
+            }
         }
     }
     /* The area under the old and new positions needs repainting. */

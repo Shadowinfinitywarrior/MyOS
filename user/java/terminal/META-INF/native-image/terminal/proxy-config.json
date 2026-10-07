@@ -1,0 +1,15 @@
+[
+  {
+    "interfaces": [
+      "java.awt.event.ActionListener",
+      "java.awt.event.MouseListener",
+      "java.awt.event.MouseMotionListener",
+      "java.awt.event.KeyListener",
+      "java.awt.event.FocusListener",
+      "toolkit.event.ActionListener",
+      "toolkit.event.MouseListener",
+      "toolkit.event.KeyListener",
+      "toolkit.event.FocusListener"
+    ]
+  }
+]

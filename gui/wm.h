@@ -121,4 +121,21 @@ void      wm_visual_rect(const wm_window_t *w, rect_t *out);
 int       wm_visible_count(void);
 wm_window_t *wm_visible_at(int index);
 
+/* Enhanced WM features */
+void wm_cycle_next(void);           /* Alt+Tab: cycle forward */
+void wm_cycle_prev(void);           /* Alt+Shift+Tab: cycle backward */
+void wm_alt_tab_end(void);          /* End Alt+Tab mode */
+void wm_snap_window(wm_window_t *w, int edge);  /* Win+Arrow: snap to edge */
+void wm_toggle_maximize(wm_window_t *w);        /* Double-click or Win+Up */
+void wm_minimize_all(void);         /* Win+D: show desktop */
+void wm_restore_all(void);          /* Win+D again: restore */
+
+#define WM_MAX_DESKTOPS 4
+void wm_switch_desktop(int idx);    /* Super+Number */
+int  wm_current_desktop(void);
+void wm_move_to_desktop(wm_window_t *w, int idx);
+
+/* External state */
+extern int show_desktop_active;
+
 #endif

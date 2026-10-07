@@ -5,6 +5,7 @@
 #include "../lib/printf.h"
 #include "../drivers/framebuffer.h"
 #include "../kernel/timer.h"
+#include "../include/rust_gui.h"
 #pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
 #pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
 
@@ -77,6 +78,20 @@ static void mouse_queue_event(mouse_event_type_t type, int16_t x, int16_t y, uin
         mouse_queue[mouse_queue_head].timestamp = timer_get_ticks();
         mouse_queue_head = next;
     }
+    
+    /* Also push to Rust GUI event queue */
+    uint8_t rust_type = 0;
+    int32_t delta = 0;
+    uint8_t rust_button = button + 1; // Rust uses 1=left, 2=middle, 3=right
+    
+    switch (type) {
+        case MOUSE_EVENT_MOVE: rust_type = 4; break;
+        case MOUSE_EVENT_BUTTON_DOWN: rust_type = 5; break;
+        case MOUSE_EVENT_BUTTON_UP: rust_type = 6; break;
+        case MOUSE_EVENT_SCROLL: rust_type = 7; delta = scroll_delta; break;
+        case MOUSE_EVENT_SCROLL_H: rust_type = 8; delta = scroll_delta; break;
+    }
+    rust_gui_push_mouse_event(rust_type, x, y, rust_button, delta);
 }
 
 /* Wait for mouse controller input buffer empty */

@@ -1,0 +1,10 @@
+[
+  {
+    "name": "toolkit.Window",
+    "methods": [
+      { "name": "createNativeWindow", "parameterTypes": [], "returnType": "void" },
+      { "name": "destroyNativeWindow", "parameterTypes": [], "returnType": "void" },
+      { "name": "updateNativeWindow", "parameterTypes": [], "returnType": "void" }
+    ]
+  }
+]

@@ -32,4 +32,7 @@ void  *sys_mmap(process_t *proc, uint32_t addr, uint32_t length,
 int    sys_munmap(process_t *proc, uint32_t addr, uint32_t length);
 int    sys_mprotect(process_t *proc, uint32_t addr, uint32_t length, uint32_t prot);
 
+/* Get shmid from file descriptor (used by syscall_mmap) */
+int get_shmid_from_fd(process_t *proc, int fd);
+
 #endif

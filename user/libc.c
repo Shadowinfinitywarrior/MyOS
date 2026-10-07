@@ -3,16 +3,17 @@
 int errno;
 
 /* ==========================================
- * Syscall wrapper (SYSCALL / SysV args)
+ * Syscall wrapper (SYSCALL / SysV args) - 6 args matching kernel
  * ========================================== */
-long _syscall(long num, long a1, long a2, long a3, long a4, long a5) {
+long _syscall(long num, long a1, long a2, long a3, long a4, long a5, long a6) {
     register long r10 __asm__("r10") = a4;
     register long r8  __asm__("r8")  = a5;
+    register long r9  __asm__("r9")  = a6;
     long ret;
     __asm__ __volatile__(
         "syscall"
         : "=a"(ret)
-        : "a"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8)
+        : "a"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9)
         : "rcx", "r11", "memory"
     );
     if (ret < 0 && ret >= -4096) {
@@ -26,86 +27,93 @@ long _syscall(long num, long a1, long a2, long a3, long a4, long a5) {
  * Process control
  * ========================================== */
 void exit(int code) {
-    _syscall(SYS_EXIT, code, 0, 0, 0, 0);
+    _syscall(SYS_EXIT, code, 0, 0, 0, 0, 0);
     __builtin_unreachable();
 }
 
 pid_t fork(void) {
-    return _syscall(SYS_FORK, 0, 0, 0, 0, 0);
+    return _syscall(SYS_FORK, 0, 0, 0, 0, 0, 0);
 }
 
 pid_t exec(const char *path) {
-    return _syscall(SYS_EXECVE, (long)path, 0, 0, 0, 0);
+    return _syscall(SYS_EXECVE, (long)path, 0, 0, 0, 0, 0);
 }
 
 pid_t getpid(void) {
-    return _syscall(SYS_GETPID, 0, 0, 0, 0, 0);
+    return _syscall(SYS_GETPID, 0, 0, 0, 0, 0, 0);
 }
 
 void ps(void) {
-    _syscall(SYS_PS, 0, 0, 0, 0, 0);
+    _syscall(SYS_PS, 0, 0, 0, 0, 0, 0);
 }
 
 int uptime(void) {
-    return _syscall(SYS_UPTIME, 0, 0, 0, 0, 0);
+    return _syscall(SYS_UPTIME, 0, 0, 0, 0, 0, 0);
 }
 
 int reboot(void) {
-    return _syscall(SYS_REBOOT, 0, 0, 0, 0, 0);
+    return _syscall(SYS_REBOOT, 0, 0, 0, 0, 0, 0);
 }
 
 int shutdown(void) {
-    return _syscall(SYS_SHUTDOWN, 0, 0, 0, 0, 0);
+    return _syscall(SYS_SHUTDOWN, 0, 0, 0, 0, 0, 0);
 }
 
 void meminfo(void) {
-    _syscall(SYS_MEMINFO, 0, 0, 0, 0, 0);
+    _syscall(SYS_MEMINFO, 0, 0, 0, 0, 0, 0);
 }
 
 pid_t wait(pid_t pid, int *status) {
-    return _syscall(SYS_WAIT, pid, status ? (long)status : 0, 0, 0, 0);
+    long ret = _syscall(SYS_WAIT, pid, status ? (long)status : 0, 0, 0, 0, 0);
+    return (pid_t)ret;
 }
 
 int kill(pid_t pid, int sig) {
-    return _syscall(SYS_KILL, pid, sig, 0, 0, 0);
+    long ret = _syscall(SYS_KILL, pid, sig, 0, 0, 0, 0);
+    return (int)ret;
 }
 
 /* ==========================================
  * File I/O
  * ========================================== */
 int read(int fd, void *buf, size_t count) {
-    return _syscall(SYS_READ, fd, (long)buf, (long)count, 0, 0);
+    long ret = _syscall(SYS_READ, fd, (long)buf, (long)count, 0, 0, 0);
+    return (int)ret;
 }
 
 int write(int fd, const void *buf, size_t count) {
-    return _syscall(SYS_WRITE, fd, (long)buf, (long)count, 0, 0);
+    long ret = _syscall(SYS_WRITE, fd, (long)buf, (long)count, 0, 0, 0);
+    return (int)ret;
 }
 
 int open(const char *path, int flags) {
-    return _syscall(SYS_OPEN, (long)path, flags, 0, 0, 0);
+    long ret = _syscall(SYS_OPEN, (long)path, flags, 0, 0, 0, 0);
+    return (int)ret;
 }
 
 int close(int fd) {
-    return _syscall(SYS_CLOSE, fd, 0, 0, 0, 0);
+    long ret = _syscall(SYS_CLOSE, fd, 0, 0, 0, 0, 0);
+    return (int)ret;
 }
 
 /* ==========================================
  * Misc
  * ========================================== */
 void sleep_ms(unsigned int ms) {
-    _syscall(SYS_SLEEP, (long)ms, 0, 0, 0, 0);
+    _syscall(SYS_SLEEP, (long)ms, 0, 0, 0, 0, 0);
 }
 
 void yield(void) {
-    _syscall(SYS_YIELD, 0, 0, 0, 0, 0);
+    _syscall(SYS_YIELD, 0, 0, 0, 0, 0, 0);
 }
 
 void putchar(char c) {
-    _syscall(SYS_PUTCHAR, c, 0, 0, 0, 0);
+    _syscall(SYS_PUTCHAR, c, 0, 0, 0, 0, 0);
 }
 
 char getchar(void) {
-    return (char)_syscall(SYS_GETCHAR, 0, 0, 0, 0, 0);
+    long ret = _syscall(SYS_GETCHAR, 0, 0, 0, 0, 0, 0);
+    return (char)ret;
 }
 
 /* ==========================================
@@ -401,5 +409,47 @@ int printf(const char *fmt, ...) {
 
     __builtin_va_end(args);
     return written;
+}
+
+/* ==========================================
+ * Memory mapping
+ * ========================================== */
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+    return (void *)_syscall(SYS_MMAP, (long)addr, (long)length, (long)prot,
+                            (long)flags, (long)fd, (long)offset);
+}
+
+int munmap(void *addr, size_t length) {
+    return (int)_syscall(SYS_MUNMAP, (long)addr, (long)length, 0, 0, 0, 0);
+}
+
+int mprotect(void *addr, size_t length, int prot) {
+    return (int)_syscall(SYS_MPROTECT, (long)addr, (long)length, (long)prot, 0, 0, 0);
+}
+
+/* ==========================================
+ * Shared memory
+ * ========================================== */
+int shmget(const char *name, size_t size, int flags) {
+    return (int)_syscall(SYS_SHMGET, (long)name, (long)size, (long)flags, 0, 0, 0);
+}
+
+int shmctl(int fd, int cmd, void *arg) {
+    return (int)_syscall(SYS_SHMCTL, (long)fd, (long)cmd, (long)arg, 0, 0, 0);
+}
+
+/* ==========================================
+ * Signal handling
+ * ========================================== */
+int sigaction(int signum, const struct sigaction *act, struct sigaction *oldact) {
+    return (int)_syscall(SYS_SIGACTION, (long)signum, (long)act, (long)oldact, 0, 0, 0);
+}
+
+int sigprocmask(int how, const uint32_t *set, uint32_t *oldset) {
+    return (int)_syscall(SYS_SIGPROCMASK, (long)how, (long)set, (long)oldset, 0, 0, 0);
+}
+
+int sigreturn(void *saved_regs) {
+    return (int)_syscall(SYS_SIGRETURN, (long)saved_regs, 0, 0, 0, 0, 0);
 }
 

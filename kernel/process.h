@@ -11,6 +11,7 @@
 #define KERNEL_STACK_SIZE 65536
 #define USER_STACK_SIZE   32768
 #define USER_STACK_TOP    0xBFFFF000
+#define USER_STACK_BOTTOM (USER_STACK_TOP - USER_STACK_SIZE)
 
 /* Process states */
 typedef enum {
@@ -110,6 +111,7 @@ typedef struct process {
     /* Signals */
     uint32_t         pending_signals;
     uint32_t         signal_mask;
+    struct sigaction sig_actions[NSIGNALS];
 
     /* Exit */
     int              exit_code;

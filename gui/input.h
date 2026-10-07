@@ -75,5 +75,20 @@ bool      input_button_down(uint8_t button);
 #define GUIKEY_PGUP       0x004E
 #define GUIKEY_PGDN       0x004D
 #define GUIKEY_DELETE     0x004C
+#define GUIKEY_1          0x001E
+#define GUIKEY_2          0x001F
+#define GUIKEY_3          0x0020
+#define GUIKEY_4          0x0021
+#define GUIKEY_5          0x0022
+#define GUIKEY_6          0x0023
+#define GUIKEY_7          0x0024
+#define GUIKEY_8          0x0025
+#define GUIKEY_9          0x0026
+#define GUIKEY_0          0x0027
+#define GUIKEY_D          0x0007
+#define GUIKEY_ALT        0x00E2
+#define GUIKEY_ALT_GR     0x00E6
+#define GUIKEY_SUPER      0x00E3
+#define GUIKEY_SUPER_R    0x00E7
 
 #endif

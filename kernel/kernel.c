@@ -14,6 +14,7 @@
 #include "paging.h"
 #include "pmm.h"
 #include "heap.h"
+#include "pagefault.h"
 #include "../lib/printf.h"
 #pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
 #pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
@@ -92,6 +93,10 @@ void kernel_main_64(void){
     syscall_init();
     syscall_init_64();
     timer_init(1000);
+
+    /* Page fault handler (vector 14) with COW and demand paging support */
+    pagefault_init();
+    isr_register_handler(14, pagefault_handler);
 
     /* Process and scheduler subsystem (PID 0 = idle) */
     process_init();

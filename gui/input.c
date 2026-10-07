@@ -2,6 +2,7 @@
 #include "../drivers/mouse.h"
 #include "../drivers/keyboard.h"
 #include "../kernel/timer.h"
+#include "../include/rust_gui.h"
 
 static gui_input_t in;
 static uint8_t button_state;   /* sticky, so windows can test "is held" */
@@ -12,6 +13,30 @@ void input_push(const gui_event_t *e) {
     in.q[in.head] = *e;
     in.head = next;
     in.dirty = true;
+
+    /* Also push to Rust GUI event queue */
+    switch (e->type) {
+        case EV_MOUSE_MOVE:
+            rust_gui_push_mouse_event(4, e->x, e->y, 0, 0);
+            break;
+        case EV_MOUSE_DOWN:
+            rust_gui_push_mouse_event(5, e->x, e->y, e->button + 1, 0);
+            break;
+        case EV_MOUSE_UP:
+            rust_gui_push_mouse_event(6, e->x, e->y, e->button + 1, 0);
+            break;
+        case EV_MOUSE_SCROLL:
+            rust_gui_push_mouse_event(7, e->x, e->y, 0, e->scroll);
+            break;
+        case EV_KEY_DOWN:
+            rust_gui_push_key_event(1, e->keycode, e->ascii, e->modifiers);
+            break;
+        case EV_KEY_UP:
+            rust_gui_push_key_event(2, e->keycode, e->ascii, e->modifiers);
+            break;
+        default:
+            break;
+    }
 }
 
 void input_pump(void) {

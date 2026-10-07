@@ -11,6 +11,10 @@ void ac97_init(uint16_t nambar, uint16_t nabmbar, uint8_t irq) {
     kprintf("[AC97] Initialized\n");
 }
 
+void ac97_probe(void) {
+    kprintf("[AC97] Probing... not found (stub)\n");
+}
+
 void ac97_play(const uint8_t *samples, uint32_t num_samples, uint32_t sample_rate) {
     (void)samples; (void)num_samples; (void)sample_rate;
     playing = true;
