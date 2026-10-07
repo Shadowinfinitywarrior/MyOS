@@ -323,131 +323,119 @@ GPT partition table detection and mounting (kernel/gpt_detect.c, kernel/gpt_ext4
 
 ## 11. GUI Subsystem
 
-The GUI is a modern desktop environment with window management, theming, and applications.
+The GUI is an acrylic dark desktop environment featuring subpixel antialiasing, damage-rectangle compositing, a multi-window manager, multi-user security, dynamic HiDPI scaling, and rich inbuilt applications.
 
-### Window Manager - gui/wm.c (576 lines), gui/wm.h
+### Window Manager - gui/wm.c, gui/wm.h
 
-Core window management:
-- Window creation, destruction, focus management
-- Z-ordering (stacking)
-- Window movement, resizing, maximizing, minimizing
-- Title bars with close/min/max buttons
-- Window decorations and shadows
-- Event handling (mouse/keyboard routing)
-- Hit-testing for window borders and controls
-- Damage tracking for efficient redrawing
+Core window management features:
+- Window creation, destruction, focus management (strict click-to-focus to avoid mouse hover focus stealing)
+- Z-ordering (stacking order with active raise)
+- Window dragging, edge resizing, maximizing, minimizing
+- Title bars with close/min/max acrylic buttons
+- Ambient drop shadows beneath windows (`WM_SHADOW_PAD`)
+- Event handling and routing (mouse and keyboard)
+- Hit-testing for borders, buttons, and client areas
+- Damage tracking for dirty regions (`surface_present`, `fb_add_damage`)
 
-Key structures: `wm_window_t`, window flags (`WF_MINIMIZED`, `WF_MAXIMIZED`, `WF_RESIZING`, etc.)
+### Desktop Shell & Compositor - gui/desktop.c, gui/desktop.h
 
-### Desktop Shell - gui/desktop.c (665 lines), gui/desktop.h
+Desktop environment and compositing pipeline:
+- Procedural gradient wallpaper with high-precision subpixel blending
+- Top status bar with OS brand logo, active window title, network/battery indicators, live clock, and user badge
+- Quick-launch left navigation bar and bottom app dock with hover animations
+- Start menu with categorized app launcher and keyboard arrow navigation
+- Multi-language frame rendering (invoking Rust GUI window composition via `rust_gui_render_frame()`)
+- Damage-based frame rendering (flushes only dirty areas to the VGA LFB rather than copying 3.15 MB on every tick)
+- Real-time Alt+Tab window cycling and Super/Win key start menu toggling
 
-Desktop environment with:
-- Wallpaper rendering (gradient with glow effects)
-- Taskbar at bottom with Start menu, window buttons, system tray (clock, uptime)
-- Desktop icons for launching applications
-- Start menu with app launcher
-- Mouse interaction for icons and taskbar
-- Integration with window manager
+### Authentication & Lockscreen - gui/login.c, gui/login.h
 
-### Applications - gui/apps.c (307 lines), gui/apps.h
+Multi-user authentication and lockscreen subsystem:
+- Visual login dialog card with frosted acrylic styling
+- Default user credentials (`myos` / `myos`) with hidden password masking (bullet dots)
+- User credential database with persistent disk backing
+- Instant lock screen presentation via `lock` or Super+L shortcut
+- Automatic keyboard focus transfer to terminal on session unlock (`login_unlock()`)
 
-Built-in applications:
-- **File Explorer** (`app_open_files()`): Browse filesystem (ramfs/devfs), navigate directories, view files
-- **About** (`app_open_about()`): System information panel
-- **Help** (`app_open_help()`): Keyboard shortcuts and mouse reference
-- **System Info** (`app_open_sysinfo()`): Live process/memory statistics, CPU/memory usage
+### Inbuilt Desktop Applications - gui/apps.c, gui/browser.c
 
-### Terminal - gui/term.c (242 lines), gui/term.h
+Built-in graphical applications:
+- **MyOS Terminal** (`gui/term.c`): Hardware-accelerated terminal emulator with VT100 support, scrollback, canonical line editing, and immediate focus
+- **Calculator** (`app_open_calc()`): Clean arithmetic calculator with quick calculation and mouse/keyboard entry
+- **Text Editor** (`app_open_editor()`): Multiline text notepad for editing and inspecting configuration and notes
+- **Sound Studio / Music Player** (`app_open_music()`): Synthesizer and audio player utilizing the kernel AC'97 and PC Speaker sound drivers
+- **Settings & Control Center** (`app_open_settings()`): System overview, theme switcher, DPI scaler, and mouse sensitivity tuning
+- **Tor Onion Browser** (`gui/browser.c`): Inbuilt privacy-focused browser with onion routing emulation and web page rendering
+- **File Explorer** (`app_open_files()`): Browse filesystem (ramfs, devfs, ext4), navigate directories, and view files
+- **About & System Architecture** (`app_open_about()`): Modern acrylic dialog showcasing system specs, memory paging, and architectural pillars
+- **Help Center** (`app_open_help()`): Keyboard shortcuts and mouse reference
+- **System Diagnostics** (`app_open_sysinfo()`): Real-time process and memory allocation statistics
 
-Graphical terminal emulator:
-- Renders vtty character grid to window surface
-- Forwards keyboard input to attached vtty
-- Scrollback support with mouse wheel
-- Cursor blinking
-- ANSI color support
-- Attaches to shell processes (spawns ring-3 sh)
+### Cursor & Smooth Movement - gui/cursor.c, gui/cursor.h
 
-### Graphics Rendering - gui/blit.c (105 lines), gui/surface.c (222 lines)
+Ultra-smooth software cursor engine:
+- High-definition cursor glyph with 2-layer ambient drop shadow
+- Software background save and restore (`under_cursor`): saves backbuffer pixels beneath cursor prior to drawing, restores pixels upon movement
+- Exact bounding box invalidation (~20×27 pixels) preventing full-screen redraw stalls
+- Dynamic cursor shapes: Arrow, Hand, I-Beam, Resize Horizontal, Resize Vertical, Diagonal Resize
 
-2D graphics primitives:
-- Surface creation/destruction
-- Pixel operations
-- Rectangles (filled, outlined, rounded)
-- Blitting and alpha blending
-- Anti-aliased rounded shapes
-- Glyph rendering support
+### Multi-Language GUI Integration
 
-### Text Rendering - gui/text.c (166 lines)
+- **Rust GUI Core** (`gui/rust/`): Static library (`libmyos_gui.a`) implementing safe window abstractions and scene graphs
+- **Go / TinyGo Shell** (`gui/go/shell/`): Taskbar, dock, and menu components compiled with TinyGo
+- **Java Native Bindings** (`gui/java_binding.c`): Bridge connecting JVM applications to the native window manager
+- **MicroPython Runtime** (`user/python/`): Embedded Python interpreter for desktop automation scripts
 
-Font rendering using pre-baked fonts:
-- Supports multiple fonts (UI, Mono, Bold, Blocks)
-- Glyph caching and rasterization
-- Text measurement (width calculation)
-- Multi-line text with truncation
+### Dynamic HiDPI Scaling
 
-### Theme System - gui/theme.c (21 lines), gui/theme.h
-
-Consistent color palette for UI:
-- Window backgrounds, title bars, borders
-- Accent colors, text colors (normal/dim/bright)
-- Terminal colors (16 ANSI colors)
-- Button states (hover, close, min, max)
-- Taskbar and desktop styling
-
-### Input Handling - gui/input.c (106 lines)
-
-GUI input abstraction:
-- Event queue for mouse/keyboard events
-- Event types: MOUSE_DOWN/MOVE/UP, KEY_DOWN/UP
-- Coordinates mapped to window client areas
-
-### Cursor - gui/cursor.c (229 lines)
-
-Mouse cursor rendering:
-- Custom cursor bitmap (arrow shape)
-- Hardware/software cursor rendering
-- Cursor position tracking
-- Hotspot handling
-
-### Desktop Boot - gui/desktop_boot.c (72 lines), gui/desktop_boot.h
-
-Bootstraps GUI environment:
-- Checks for framebuffer availability
-- Initializes WM, cursor, desktop
-- Opens initial windows (terminal with shell, About app)
-- Creates desktop kernel process
-- Yields to scheduler
+- Supports runtime scaling: 96 DPI (1.0x), 120 DPI (1.25x), and 144 DPI (1.5x)
+- Scaled font metrics, window metrics, and UI controls configured via `OS_CMD_SET_DPI`
 
 
 ## 12. Virtual Terminal (vtty)
 
-**kernel/vtty.c** (423 lines), **kernel/vtty.h**
+**kernel/vtty.c**, **kernel/vtty.h**
 
-Virtual terminal emulator for text output:
-- Multiple independent vtys
-- Character grid (rows × columns)
-- ANSI escape sequence parsing (color, cursor movement, clearing, attributes)
-- Input ring buffer for keyboard input
-- Output ring buffer
-- Cursor position, visibility, blink state
+Virtual terminal emulator for text and shell I/O:
+- Multiple independent virtual terminals (boot console, GUI terminal)
+- Character grid (80×25 text or custom pixel-derived grids)
+- ANSI escape sequence parsing (colors, cursor repositioning, erase codes)
+- Input ring buffer with canonical line editing support
+- Output ring buffer with scrollback history
+- Cursor position, visibility, and blink state tracking
 - Text attributes (bold, dim, underline, inverse)
 - Console device binding (`/dev/console`)
 - Process attachment for I/O redirection
 
+Canonical line-editing features in `kernel/syscall.c` (`sys_read`):
+- Normalization of Enter (`\r` mapped to `\n`)
+- Line editing backspace (`\b`, `0x7F`, `8`) with character erasure (`\b \b`) and buffer decrement
+- Non-blocking yield when awaiting keyboard input
+
 
 ## 13. Userspace
 
-### Programs - user/*.c
+### Programs & Shell - user/*.c
+
+**user/sh.c**: Modern MyOS interactive shell (`myos-sh v2.0`)
+- Canonical line editing and input sanitization (`sanitize_input`)
+- Whitespace-tolerant argument parsing (`\t`, `\r`, `\n`, `' '`)
+- Case-insensitive command execution (`cmd_is`) with aliases (`?`, `--help`, `-h`)
+- Built-in command center:
+  - **Auth**: `whoami`, `users`, `useradd`, `passwd`, `login`, `lock`, `logout`
+  - **Storage**: `storage` / `df`, `sync`, `portable` / `usb`
+  - **Hardware**: `drivers`, `lspci`
+  - **Inbuilt Apps**: `calc`, `editor`, `music`, `settings`, `tor` / `browser`
+  - **GUI Control**: `wm list`, `wm close`, `wm focus`, `wm tile`, `app <name>`, `dpi [96|120|144]`, `theme <name>`, `mouse [1-10]`
+  - **System**: `ps`, `uptime`, `free` / `mem`, `kill`, `fetch` / `uname`, `sound` / `beep`, `clear`, `reboot`, `shutdown`
+- External binary execution from `/bin`
 
 **user/hello.c**: Simple hello world program
 **user/forkdemo.c**: Demonstrates fork() syscall
-**user/sh.c**: Shell command interpreter
-- Built-in commands: cd, pwd, ls, cat, echo, ps, free, run, exit
-- Executes programs from /bin
-- Supports pipes/redirection (basic)
 **user/init.c**: Init process - first userspace program
-**user/setterm.c**: Terminal configuration utility
-**user/terminal.c**: Terminal program
+**user/calc.c**: Standalone CLI calculator utility
+**user/df.c**: Filesystem disk free utility
+**user/files.c**: Command-line file browser utility
 **user/crt0.asm**: C runtime startup for user programs
 **user/libc.c**: Userspace C library functions
 
