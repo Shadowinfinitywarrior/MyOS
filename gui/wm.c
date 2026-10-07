@@ -783,3 +783,52 @@ void wm_move_to_desktop(wm_window_t *w, int idx) {
         desktop_windows[idx][desktop_win_count[idx]++] = w;
     }
 }
+
+void wm_tile_all(void) {
+    int vis[WM_MAX_WINDOWS];
+    int count = 0;
+    for (int i = 0; i < win_count; i++) {
+        if (windows[i]->visible && !(windows[i]->flags & WF_MINIMIZED)) {
+            vis[count++] = i;
+        }
+    }
+    if (count == 0) return;
+    int work_h = screen_h - 40;
+    if (count == 1) {
+        wm_window_t *w = windows[vis[0]];
+        w->frame.x = 90;
+        w->frame.y = 50;
+        w->frame.w = screen_w - 180;
+        w->frame.h = work_h - 60;
+        sync_surface(w);
+        wm_invalidate(w);
+    } else if (count == 2) {
+        wm_window_t *w1 = windows[vis[0]];
+        wm_window_t *w2 = windows[vis[1]];
+        int half_w = (screen_w - 130) / 2;
+        w1->frame.x = 100;
+        w1->frame.y = 50;
+        w1->frame.w = half_w;
+        w1->frame.h = work_h - 60;
+        w2->frame.x = 100 + half_w + 14;
+        w2->frame.y = 50;
+        w2->frame.w = half_w;
+        w2->frame.h = work_h - 60;
+        sync_surface(w1);
+        sync_surface(w2);
+        wm_invalidate(w1);
+        wm_invalidate(w2);
+    } else {
+        int half_w = (screen_w - 130) / 2;
+        int half_h = (work_h - 70) / 2;
+        for (int i = 0; i < count && i < 4; i++) {
+            wm_window_t *w = windows[vis[i]];
+            w->frame.x = (i % 2 == 0) ? 100 : (100 + half_w + 14);
+            w->frame.y = (i < 2) ? 50 : (half_h + 60);
+            w->frame.w = half_w;
+            w->frame.h = half_h;
+            sync_surface(w);
+            wm_invalidate(w);
+        }
+    }
+}

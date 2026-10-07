@@ -56,6 +56,27 @@
 #define SYS_GUI_SET_WINDOW_TITLE      60
 #define SYS_GUI_GET_WINDOW_RECT       61
 #define SYS_GUI_SET_WINDOW_RECT       62
+#define SYS_OS_CONTROL                65
+
+/* OS control command opcodes for SYS_OS_CONTROL */
+#define OS_CMD_AUTH_LOGIN     1
+#define OS_CMD_AUTH_ADD_USER  2
+#define OS_CMD_AUTH_PASSWD    3
+#define OS_CMD_AUTH_WHOAMI    4
+#define OS_CMD_AUTH_USERS     5
+#define OS_CMD_AUTH_LOCK      6
+#define OS_CMD_AUTH_LOGOUT    7
+#define OS_CMD_WM_LIST        10
+#define OS_CMD_WM_CLOSE       11
+#define OS_CMD_WM_FOCUS       12
+#define OS_CMD_WM_TILE        13
+#define OS_CMD_APP_LAUNCH     14
+#define OS_CMD_SET_THEME      15
+#define OS_CMD_SET_MOUSE      16
+#define OS_CMD_GET_MOUSE      17
+#define OS_CMD_STORAGE_INFO   20
+#define OS_CMD_STORAGE_SYNC   21
+#define OS_CMD_PORTABLE_LIST  22
 
 /* IPC/MYDP syscalls for cross-language integration */
 #define SYS_IPC_PORT_CREATE       70

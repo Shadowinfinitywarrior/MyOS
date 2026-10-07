@@ -24,6 +24,13 @@
 #define WM_MIN_H        120
 #define WM_TITLE_MAX     64
 
+#undef WF_MINIMIZED
+#undef WF_MAXIMIZED
+#undef WF_RESIZING
+#undef WF_DRAGGING
+#undef WF_NO_DECOR
+#undef WF_MODAL
+
 typedef enum {
     WF_MINIMIZED  = 1 << 0,
     WF_MAXIMIZED  = 1 << 1,
@@ -127,6 +134,7 @@ void wm_cycle_prev(void);           /* Alt+Shift+Tab: cycle backward */
 void wm_alt_tab_end(void);          /* End Alt+Tab mode */
 void wm_snap_window(wm_window_t *w, int edge);  /* Win+Arrow: snap to edge */
 void wm_toggle_maximize(wm_window_t *w);        /* Double-click or Win+Up */
+void wm_tile_all(void);                         /* Tile all windows side-by-side */
 void wm_minimize_all(void);         /* Win+D: show desktop */
 void wm_restore_all(void);          /* Win+D again: restore */
 

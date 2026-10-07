@@ -191,6 +191,18 @@ static inline void put(int x, int y, color_t c, uint32_t *bb, int stride) {
     bb[(size_t)y * (size_t)stride + x] = c;
 }
 
+static inline void put_blend(int x, int y, color_t c, uint32_t alpha, uint32_t *bb, int stride) {
+    fb_info_t *info = fb_get_info();
+    if (x < 0 || y < 0 || x >= (int)info->width || y >= (int)info->height) return;
+    size_t idx = (size_t)y * (size_t)stride + (size_t)x;
+    uint32_t dst = bb[idx];
+    uint32_t inv = 256 - alpha;
+    uint32_t r = (((dst >> 16) & 0xFF) * inv + (((c >> 16) & 0xFF) * alpha)) >> 8;
+    uint32_t g = (((dst >> 8) & 0xFF) * inv + (((c >> 8) & 0xFF) * alpha)) >> 8;
+    uint32_t b = ((dst & 0xFF) * inv + ((c & 0xFF) * alpha)) >> 8;
+    bb[idx] = (r << 16) | (g << 8) | b;
+}
+
 void cursor_erase(void) {
     last_x = last_y = -1;
 }
@@ -201,21 +213,20 @@ void cursor_draw(void) {
     int stride = fb_get_stride();
     int x = input_mouse_x() - hot_x;
     int y = input_mouse_y() - hot_y;
-    /* No early-out on an unchanged position: the desktop repaints the whole
-     * work area every frame, so a cursor drawn only on frames where the mouse
-     * moved is erased by the very next repaint and flickers out of existence.
-     * 12x19 pixels per frame is cheaper than getting this wrong. */
     last_x = x;
     last_y = y;
 
     const char **map = shape_for(shape);
 
-    /* Shadow first, offset down-right, so the pointer reads cleanly on any background. */
+    /* Smooth 2-layer ambient drop shadow with soft alpha falloff */
     for (int row = 0; row < CURSOR_H; row++) {
         for (int col = 0; col < CURSOR_W; col++) {
             char ch = map[row][col];
-            if (ch == '#' || ch == '*' || ch == 'X') {
-                put(x + col + 1, y + row + 2, RGB(0x05, 0x07, 0x0C), bb, stride);
+            if (ch == '#' || ch == '*' || ch == 'X' || ch == '+') {
+                /* Outer soft blur */
+                put_blend(x + col + 2, y + row + 3, RGB(0x04, 0x06, 0x0A), 50, bb, stride);
+                /* Inner soft shadow */
+                put_blend(x + col + 1, y + row + 2, RGB(0x06, 0x09, 0x0E), 110, bb, stride);
             }
         }
     }
@@ -227,9 +238,11 @@ void cursor_draw(void) {
                 put(x + col, y + row, RGB(0x10, 0x14, 0x1E), bb, stride);
             } else if (ch == '*') {
                 put(x + col, y + row, RGB(0xFF, 0xFF, 0xFF), bb, stride);
+            } else if (ch == '+') {
+                put(x + col, y + row, RGB(0xD8, 0xDE, 0xE9), bb, stride);
             }
         }
     }
     /* The area under the old and new positions needs repainting. */
-    fb_add_damage(x - 3, y - 3, CURSOR_W + 6, CURSOR_H + 6);
+    fb_add_damage(x - 4, y - 4, CURSOR_W + 8, CURSOR_H + 8);
 }

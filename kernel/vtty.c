@@ -179,20 +179,20 @@ static void sgr_apply(vtty_t *v, int n, const int *p) {
  * (and has been dispatched). */
 static bool esc_dispatch(vtty_t *v, char c) {
     if (c >= '0' && c <= '9') {
-        if (esc.sgr_n < 8) esc.sgr[esc.sgr_n++] = esc.sgr[0] * 10 + (c - '0');
+        if (esc.sgr_n < 8) {
+            esc.sgr[esc.sgr_n] = esc.sgr[esc.sgr_n] * 10 + (c - '0');
+        }
         return false;
     }
     if (c == ';') {
-        if (esc.sgr_n < 8) {
-            esc.sgr[esc.sgr_n++] = esc.sgr[0];
+        if (esc.sgr_n < 7) {
+            esc.sgr_n++;
             esc.sgr[esc.sgr_n] = 0;
         }
         return false;
     }
     /* Final byte. */
-    int n = esc.sgr_n ? esc.sgr_n : 1;
-    if (esc.sgr_n) { esc.sgr[esc.sgr_n] = 0; }
-    else { esc.sgr[0] = 0; }
+    int n = esc.sgr_n + 1;
 
     switch (c) {
         case 'm': sgr_apply(v, n, esc.sgr); break;

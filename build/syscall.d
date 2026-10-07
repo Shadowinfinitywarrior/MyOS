@@ -11,7 +11,12 @@ build/syscall.o: kernel/syscall.c kernel/syscall.h \
  kernel/../include/../gui/rect.h \
  kernel/../include/../gui/../include/types.h \
  kernel/../include/../gui/surface.h kernel/../include/../gui/blit.h \
- kernel/../include/../gui/rect.h
+ kernel/../include/../gui/rect.h kernel/../gui/wm.h \
+ kernel/../gui/surface.h kernel/../gui/text.h kernel/../gui/blit.h \
+ kernel/../gui/input.h kernel/../gui/rect.h \
+ kernel/../gui/../include/types.h kernel/../gui/desktop.h \
+ kernel/../gui/wm.h kernel/../gui/login.h kernel/../drivers/mouse.h \
+ kernel/storage.h
 kernel/syscall.h:
 kernel/../include/types.h:
 kernel/../include/system.h:
@@ -42,3 +47,15 @@ kernel/../include/../gui/../include/types.h:
 kernel/../include/../gui/surface.h:
 kernel/../include/../gui/blit.h:
 kernel/../include/../gui/rect.h:
+kernel/../gui/wm.h:
+kernel/../gui/surface.h:
+kernel/../gui/text.h:
+kernel/../gui/blit.h:
+kernel/../gui/input.h:
+kernel/../gui/rect.h:
+kernel/../gui/../include/types.h:
+kernel/../gui/desktop.h:
+kernel/../gui/wm.h:
+kernel/../gui/login.h:
+kernel/../drivers/mouse.h:
+kernel/storage.h:

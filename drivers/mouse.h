@@ -49,9 +49,11 @@ void mouse_get_position(int *x, int *y);
 
 /* Set mouse sensitivity (1-10, default 5) */
 void mouse_set_sensitivity(uint8_t sensitivity);
+uint8_t mouse_get_sensitivity(void);
 
 /* Enable/disable mouse acceleration */
 void mouse_set_acceleration(bool enabled);
+bool mouse_get_acceleration(void);
 
 /* Get mouse button name */
 const char *mouse_button_name(uint8_t button);

@@ -148,22 +148,26 @@ static int apply_sensitivity(int delta) {
     int abs_delta = delta < 0 ? -delta : delta;
     int sign = delta < 0 ? -1 : 1;
     
-    /* Apply sensitivity (1-10, default 5) */
-    abs_delta = (abs_delta * mouse_sensitivity) / 5;
-
-    /* Acceleration exists to make fine positioning easier, so it boosts only
-     * the very smallest movement. Applying it to longer ones is actively
-     * harmful: a single 60px packet became 60 + (58*58)/4 = 901px, which
-     * slammed the pointer into the screen edge. Doubling every packet in the
-     * 2..8 range was wrong too - QEMU splits one long move into many small
-     * packets, so the boost accumulated and the pointer overshot its target by
-     * roughly 10%. Emitting 2 for a 1px step keeps the feature without moving
-     * the goalposts under the pointer. */
-    if (mouse_acceleration && abs_delta == 1) {
-        abs_delta = 2;
+    /* Fine positioning (1..2 pixels): Keep exact 1:1 precision without jitter */
+    int scaled;
+    if (abs_delta <= 2) {
+        scaled = abs_delta;
+    } else {
+        /* Smooth progressive acceleration curve for fluid movement across screen */
+        if (mouse_acceleration) {
+            int extra = ((abs_delta - 2) * (abs_delta - 2)) / 8;
+            if (extra > 12) extra = 12;
+            scaled = abs_delta + extra;
+        } else {
+            scaled = abs_delta;
+        }
     }
+    
+    /* Apply sensitivity (1-10, default 5) */
+    scaled = (scaled * (int)mouse_sensitivity) / 5;
+    if (scaled < 1) scaled = 1;
 
-    return abs_delta * sign;
+    return scaled * sign;
 }
 
 /* Shared post-decode pipeline: apply sensitivity/acceleration, update state,
@@ -404,17 +408,17 @@ void mouse_init(void) {
         }
     }
 
-    /* Set sample rate to 100 Hz */
+    /* Set sample rate to 200 Hz for maximum smoothness and low latency */
     mouse_write(MOUSE_CMD_SET_SAMPLE_RATE);
     mouse_read();
-    mouse_write(100);
+    mouse_write(200);
     mouse_read();
 
-    /* Set resolution to 8 counts/mm (value 2) */
+    /* Set resolution to highest 8 counts/mm */
     mouse_write(MOUSE_CMD_SET_RESOLUTION);
     mouse_read();
 
-    mouse_write(2);
+    mouse_write(3);
     mouse_read();
 
 
@@ -485,8 +489,16 @@ void mouse_set_sensitivity(uint8_t sensitivity) {
     mouse_sensitivity = sensitivity;
 }
 
+uint8_t mouse_get_sensitivity(void) {
+    return mouse_sensitivity;
+}
+
 void mouse_set_acceleration(bool enabled) {
     mouse_acceleration = enabled;
+}
+
+bool mouse_get_acceleration(void) {
+    return mouse_acceleration;
 }
 
 const char *mouse_button_name(uint8_t button) {

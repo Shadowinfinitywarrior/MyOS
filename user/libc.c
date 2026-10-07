@@ -23,6 +23,10 @@ long _syscall(long num, long a1, long a2, long a3, long a4, long a5, long a6) {
     return ret;
 }
 
+long os_control(long cmd, long a1, long a2, long a3) {
+    return _syscall(SYS_OS_CONTROL, cmd, a1, a2, a3, 0, 0);
+}
+
 /* ==========================================
  * Process control
  * ========================================== */

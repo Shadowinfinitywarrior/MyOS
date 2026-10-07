@@ -1,4 +1,5 @@
 #include "apps.h"
+#include "logo.h"
 #include "theme.h"
 #include "text.h"
 #include "term.h"
@@ -163,44 +164,39 @@ static void about_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     surface_fill_rect(s, c, TH_WIN_BG);
 
     /* Header band with product name and glowing badge */
-    rect_t band = { c->x, c->y, c->w, 86 };
-    surface_gradient_v(s, &band, RGB(0x24, 0x33, 0x50), RGB(0x14, 0x1B, 0x26));
-    rect_t band_line = { c->x, c->y + 85, c->w, 1 };
-    surface_fill_rect(s, &band_line, RGB(0x30, 0x38, 0x48));
+    rect_t band = { c->x, c->y, c->w, 92 };
+    surface_gradient_v(s, &band, RGB(0x1E, 0x2A, 0x44), RGB(0x10, 0x16, 0x22));
+    rect_t band_line = { c->x, c->y + 91, c->w, 1 };
+    surface_fill_rect(s, &band_line, RGB(0x2E, 0x38, 0x4A));
 
-    /* Modern logo icon badge */
-    rect_t badge = { c->x + 18, c->y + 18, 48, 48 };
-    surface_rounded_fill(s, &badge, 12, RGB(0x38, 0x8B, 0xFD));
-    surface_rounded_outline(s, &badge, 12, RGB(0x79, 0xB8, 0xFF), 1);
-    /* Atom / shield symbol */
-    rect_t inner = { c->x + 32, c->y + 32, 20, 20 };
-    surface_rounded_fill(s, &inner, 10, RGB(0xFF, 0xFF, 0xFF));
-    rect_t core = { c->x + 38, c->y + 38, 8, 8 };
-    surface_rounded_fill(s, &core, 4, RGB(0x1F, 0x6F, 0xEB));
+    /* Planetary Orbital Ribbon 'M' Logo */
+    logo_draw_surface(s, c->x + 44, c->y + 46, 56);
 
-    text_draw(s, font_bold(), c->x + 76, c->y + 22, "MyOS Modern Desktop", TH_TEXT_BRIGHT);
-    text_draw(s, font_ui(), c->x + 76, c->y + 46, "64-bit Unix OS • Multi-Language GUI", TH_TITLE_TEXT_DIM);
+    text_draw(s, font_bold(), c->x + 82, c->y + 20, "MyOS Modern Edition", RGB(0xFF, 0xFF, 0xFF));
+    text_draw(s, font_ui(), c->x + 82, c->y + 42, "FREEDOM • PRIVACY • PERFORMANCE", RGB(0x00, 0xD2, 0xFF));
+    text_draw(s, font_ui(), c->x + 82, c->y + 62, "A Cleaner, Smarter, Faster Operating System", RGB(0x8A, 0x9B, 0xB5));
 
-    int y = c->y + 102;
+    int y = c->y + 104;
     rect_t p1 = { c->x + 16, y, c->w - 32, 134 };
-    panel(s, &p1, "System Information");
+    panel(s, &p1, "System Architecture");
     y = p1.y + 36;
-    y = kv_line(s, y, "Architecture", "x86-64 Long Mode", p1.x + 14, p1.w - 28);
-    y = kv_line(s, y, "Kernel", "SMP Preemptive Ring 0", p1.x + 14, p1.w - 28);
-    y = kv_line(s, y, "Memory Space", "Higher-Half Paged", p1.x + 14, p1.w - 28);
-    y = kv_line(s, y, "Display Engine", "1024x768 32bpp", p1.x + 14, p1.w - 28);
+    y = kv_line(s, y, "Architecture", "x86-64 Long Mode (SMP)", p1.x + 14, p1.w - 28);
+    y = kv_line(s, y, "Memory & Paging", "Higher-Half Paged COW", p1.x + 14, p1.w - 28);
+    y = kv_line(s, y, "Display Engine", "1024x768 32bpp Anti-Aliased", p1.x + 14, p1.w - 28);
+    y = kv_line(s, y, "Mouse Engine", "200Hz Ultra-Smooth Polling", p1.x + 14, p1.w - 28);
 
-    y = p1.y + p1.h + 14;
-    rect_t p2 = { c->x + 16, y, c->w - 32, 114 };
-    panel(s, &p2, "Modern Architecture");
+    y = p1.y + p1.h + 12;
+    rect_t p2 = { c->x + 16, y, c->w - 32, 126 };
+    panel(s, &p2, "Core Pillars (Reference Design)");
     y = p2.y + 36;
-    y = kv_line(s, y, "Core Compositor", "Rust Bare-Metal", p2.x + 14, p2.w - 28);
-    y = kv_line(s, y, "Desktop Shell", "Go / C Window Manager", p2.x + 14, p2.w - 28);
-    y = kv_line(s, y, "App Runtimes", "Java & Python", p2.x + 14, p2.w - 28);
+    y = kv_line(s, y, "Privacy First", "Built-In Tor Onion Browser", p2.x + 14, p2.w - 28);
+    y = kv_line(s, y, "Secure By Design", "Multi-User & Screen Lock", p2.x + 14, p2.w - 28);
+    y = kv_line(s, y, "Persistent Storage", "Auto-Sync & Portable Media", p2.x + 14, p2.w - 28);
+    y = kv_line(s, y, "Lightweight & Fast", "Custom Ring-0 Micro-Kernel", p2.x + 14, p2.w - 28);
 }
 
 void app_open_about(void) {
-    wm_window_t *w = wm_create("About MyOS", 612, 55, 400, 460);
+    wm_window_t *w = wm_create("About MyOS", 602, 45, 416, 480);
     if (!w) return;
     w->paint = about_paint;
 }

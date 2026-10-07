@@ -3,80 +3,334 @@
 #define MAX_ARGS 16
 #define MAX_INPUT 256
 
-void parse_args(char *line, char **argv) {
-    int i = 0;
-    while (*line && i < MAX_ARGS - 1) {
+static int simple_atoi(const char *s) {
+    if (!s) return 0;
+    int res = 0;
+    while (*s >= '0' && *s <= '9') {
+        res = res * 10 + (*s - '0');
+        s++;
+    }
+    return res;
+}
+
+static int parse_args(char *line, char **argv) {
+    int argc = 0;
+    while (*line && argc < MAX_ARGS - 1) {
         while (*line == ' ') line++;
         if (!*line) break;
-        argv[i++] = line;
+        argv[argc++] = line;
         while (*line && *line != ' ') line++;
         if (*line) {
             *line = '\0';
             line++;
         }
     }
-    argv[i] = NULL;
+    argv[argc] = NULL;
+    return argc;
+}
+
+static void show_banner(void) {
+    puts("    __  ___      ____  _____    MyOS 1.0 Modern Edition (x86-64)");
+    puts("   /  |/  /_  __/ __ \\/ ___/    Kernel:   v1.0 (SMP + Async Syscalls)");
+    puts("  / /|_/ / / / / / / /\\__ \\     Shell:    myos-sh v2.0 (Real-Time Control)");
+    puts(" / /  / / /_/ / /_/ /___/ /     Display:  1024x768 32bpp (Subpixel AA)");
+    puts("/_/  /_/\\__, /\\____//____/      Security: Multi-User Auth & Lockscreen");
+    puts("       /____/                   Mouse:    200Hz Ultra-Smooth Polling");
+    puts("");
+    puts(" Type help for available commands, or control OS/GUI in real time.");
+    puts("");
+}
+
+static void show_help(void) {
+    puts("=== MyOS Terminal Control Center ===");
+    puts("");
+    puts("[ Authentication & User Management ]");
+    puts("  whoami                     - Print current logged-in user");
+    puts("  users                      - List all users in OS database");
+    puts("  useradd <user> <pass>      - Create new user account");
+    puts("  passwd <user> <new_pass>   - Update user password");
+    puts("  login <user> <pass>        - Switch current logged-in user session");
+    puts("  lock                       - Lock OS immediately with login window");
+    puts("  logout                     - Log out session and lock OS screen");
+    puts("");
+    puts("[ Persistent & Portable Storage ]");
+    puts("  storage / df               - Display persistent partitions & mounts");
+    puts("  sync                       - Flush credentials and system config to disk");
+    puts("  portable / usb             - Inspect portable USB/removable drives");
+    puts("");
+    puts("[ Tor Privacy Browser ]");
+    puts("  tor [url]                  - Launch inbuilt Tor Onion Browser");
+    puts("  browser [url]              - Alias for inbuilt privacy browser");
+    puts("");
+    puts("[ Window Manager & Desktop Control ]");
+    puts("  wm list                    - List active GUI windows (real-time)");
+    puts("  wm close <title_or_id>     - Close window in GUI");
+    puts("  wm focus <title_or_id>     - Focus and bring window to front");
+    puts("  wm tile                    - Auto-tile all windows on desktop");
+    puts("  app <name>                 - Launch GUI app (Terminal, Files, Browser, About, Help, Sysinfo)");
+    puts("  theme <name>               - Switch theme: tokyo, emerald, amber, cyberpunk");
+    puts("  mouse [1-10]               - Get or set mouse pointer speed/sensitivity");
+    puts("");
+    puts("[ System & Diagnostics ]");
+    puts("  ps                         - Show active kernel & user processes");
+    puts("  uptime                     - Display system uptime");
+    puts("  free / mem                 - Display physical memory allocation");
+    puts("  kill <pid>                 - Terminate process by PID");
+    puts("  fetch / uname              - Print system info & architecture");
+    puts("  clear                      - Clear terminal display");
+    puts("  reboot                     - Reboot machine");
+    puts("  shutdown                   - Halt machine");
+    puts("");
 }
 
 int main(void) {
     char input[MAX_INPUT];
     char *argv[MAX_ARGS];
 
-    /* Fastfetch-style modern system banner */
-    puts("\x1b[1;36m    __  ___      ____  _____ \x1b[0m   \x1b[1;37mMyOS 1.0\x1b[0m (x86-64)");
-    puts("\x1b[1;36m   /  |/  /_  __/ __ \\/ ___/ \x1b[0m   Kernel:  v1.0 (SMP)");
-    puts("\x1b[1;34m  / /|_/ / / / / / / /\\__ \\  \x1b[0m   Shell:   myos-sh v1.2");
-    puts("\x1b[1;34m / /  / / /_/ / /_/ /___/ /  \x1b[0m   Display: 1024x768 32bpp");
-    puts("\x1b[1;35m/_/  /_/\\__, /\\____//____/   \x1b[0m   Memory:  64 MB RAM");
-    puts("\x1b[1;35m       /____/                \x1b[0m   Uptime:  Active");
-    puts("");
-    puts(" Type \x1b[1;32mhelp\x1b[0m for commands, or launch apps from the dock.");
-    puts("");
+    show_banner();
 
     while (1) {
-        write(1, "\x1b[1;36mmyos\x1b[0m \x1b[1;34m>\x1b[0m ", 19);
-        
+        char cur_user[32] = "myos";
+        os_control(OS_CMD_AUTH_WHOAMI, (long)cur_user, sizeof(cur_user), 0);
+        if (cur_user[0] == '\0') strcpy(cur_user, "myos");
+
+        printf("%s > ", cur_user);
+
         int n = read(0, input, MAX_INPUT - 1);
         if (n <= 0) continue;
+
         /* Strip trailing newline / carriage return */
-        while (n > 0 && (input[n-1] == '\n' || input[n-1] == '\r')) {
+        while (n > 0 && (input[n - 1] == '\n' || input[n - 1] == '\r')) {
             input[--n] = '\0';
         }
         input[n] = '\0';
         if (n == 0) continue;
 
-        parse_args(input, argv);
-        if (!argv[0]) continue;
+        int argc = parse_args(input, argv);
+        if (argc == 0 || !argv[0]) continue;
 
+        /* ---- Help & Info ---- */
         if (strcmp(argv[0], "help") == 0) {
-            puts("Available commands:");
-            puts("  help    - Show this help message");
-            puts("  clear   - Clear screen");
-            puts("  ps      - Process status");
-            puts("  uptime  - Show system uptime");
-            puts("  exit    - Exit shell");
+            show_help();
         } else if (strcmp(argv[0], "clear") == 0) {
-            for (int k = 0; k < 30; k++) {
-                putchar('\n');
+            for (int k = 0; k < 32; k++) putchar('\n');
+        } else if (strcmp(argv[0], "fetch") == 0 || strcmp(argv[0], "sysinfo") == 0) {
+            show_banner();
+        } else if (strcmp(argv[0], "uname") == 0) {
+            puts("MyOS 1.0.0-smp x86_64 GNU/MyOS");
+
+        /* ---- Authentication Commands ---- */
+        } else if (strcmp(argv[0], "whoami") == 0) {
+            char u[32] = {0};
+            if (os_control(OS_CMD_AUTH_WHOAMI, (long)u, sizeof(u), 0) == 0 && u[0]) {
+                printf("%s\n", u);
+            } else {
+                puts("myos");
             }
+        } else if (strcmp(argv[0], "users") == 0) {
+            char buf[512] = {0};
+            long ucnt = os_control(OS_CMD_AUTH_USERS, (long)buf, sizeof(buf), 0);
+            if (ucnt >= 0) {
+                printf("Registered Users (%ld): %s\n", ucnt, buf);
+            } else {
+                puts("Failed to query user database.");
+            }
+        } else if (strcmp(argv[0], "useradd") == 0) {
+            if (argc < 3) {
+                puts("Usage: useradd <username> <password>");
+            } else {
+                long res = os_control(OS_CMD_AUTH_ADD_USER, (long)argv[1], (long)argv[2], 0);
+                if (res == 0) {
+                    printf("\x1b[1;32mSuccessfully created user '%s'.\x1b[0m\n", argv[1]);
+                } else {
+                    printf("\x1b[1;31mFailed to create user '%s'.\x1b[0m\n", argv[1]);
+                }
+            }
+        } else if (strcmp(argv[0], "passwd") == 0) {
+            if (argc < 3) {
+                puts("Usage: passwd <username> <new_password>");
+            } else {
+                long res = os_control(OS_CMD_AUTH_PASSWD, (long)argv[1], (long)argv[2], 0);
+                if (res == 0) {
+                    printf("\x1b[1;32mPassword for user '%s' updated successfully.\x1b[0m\n", argv[1]);
+                } else {
+                    printf("\x1b[1;31mFailed to update password for '%s' (user not found).\x1b[0m\n", argv[1]);
+                }
+            }
+        } else if (strcmp(argv[0], "login") == 0) {
+            if (argc < 3) {
+                puts("Usage: login <username> <password>");
+            } else {
+                long res = os_control(OS_CMD_AUTH_LOGIN, (long)argv[1], (long)argv[2], 0);
+                if (res == 0) {
+                    printf("\x1b[1;32mLogged in as '%s'. Screen unlocked.\x1b[0m\n", argv[1]);
+                } else {
+                    puts("\x1b[1;31mLogin failed: invalid username or password.\x1b[0m");
+                }
+            }
+        } else if (strcmp(argv[0], "lock") == 0) {
+            os_control(OS_CMD_AUTH_LOCK, 0, 0, 0);
+            puts("\x1b[1;33mScreen locked. Login window presented.\x1b[0m");
+        } else if (strcmp(argv[0], "logout") == 0) {
+            os_control(OS_CMD_AUTH_LOGOUT, 0, 0, 0);
+            puts("\x1b[1;33mUser session ended. Screen locked.\x1b[0m");
+
+        /* ---- Window Manager & Desktop Control ---- */
+        } else if (strcmp(argv[0], "wm") == 0) {
+            if (argc < 2) {
+                puts("Usage: wm <list|close|focus|tile> [args]");
+            } else if (strcmp(argv[1], "list") == 0) {
+                char wbuf[1024] = {0};
+                if (os_control(OS_CMD_WM_LIST, (long)wbuf, sizeof(wbuf), 0) == 0) {
+                    puts("\x1b[1;34m=== GUI Window Manager List ===\x1b[0m");
+                    puts(wbuf);
+                } else {
+                    puts("Failed to query window list.");
+                }
+            } else if (strcmp(argv[1], "close") == 0) {
+                if (argc < 3) {
+                    puts("Usage: wm close <title>");
+                } else {
+                    long res = os_control(OS_CMD_WM_CLOSE, (long)argv[2], 0, 0);
+                    if (res == 0) {
+                        printf("\x1b[1;32mClosed window '%s'.\x1b[0m\n", argv[2]);
+                    } else {
+                        printf("\x1b[1;31mWindow '%s' not found.\x1b[0m\n", argv[2]);
+                    }
+                }
+            } else if (strcmp(argv[1], "focus") == 0) {
+                if (argc < 3) {
+                    puts("Usage: wm focus <title>");
+                } else {
+                    long res = os_control(OS_CMD_WM_FOCUS, (long)argv[2], 0, 0);
+                    if (res == 0) {
+                        printf("\x1b[1;32mFocused window '%s'.\x1b[0m\n", argv[2]);
+                    } else {
+                        printf("\x1b[1;31mWindow '%s' not found.\x1b[0m\n", argv[2]);
+                    }
+                }
+            } else if (strcmp(argv[1], "tile") == 0) {
+                os_control(OS_CMD_WM_TILE, 0, 0, 0);
+                puts("\x1b[1;32mAll desktop windows tiled in real time.\x1b[0m");
+            } else {
+                puts("Unknown wm subcommand. Choose: list, close, focus, tile");
+            }
+
+        /* ---- Tor Inbuilt Privacy Browser ---- */
+        } else if (strcmp(argv[0], "tor") == 0 || strcmp(argv[0], "browser") == 0) {
+            long res = os_control(OS_CMD_APP_LAUNCH, (long)"Browser", 0, 0);
+            if (res == 0) {
+                printf("\x1b[1;36mLaunched Inbuilt Tor Browser (Circuit: Guard -> Relay -> Exit)\x1b[0m\n");
+            } else {
+                puts("\x1b[1;31mFailed to launch Tor Browser.\x1b[0m");
+            }
+
+        /* ---- Persistent & Portable Storage Control ---- */
+        } else if (strcmp(argv[0], "storage") == 0 || strcmp(argv[0], "df") == 0) {
+            char out[512] = "";
+            os_control(OS_CMD_STORAGE_INFO, (long)out, sizeof(out), 0);
+            puts("=== Active Storage Mounts & Filesystems ===");
+            printf("%s", out);
+        } else if (strcmp(argv[0], "sync") == 0) {
+            os_control(OS_CMD_STORAGE_SYNC, 0, 0, 0);
+            puts("\x1b[1;32mSynchronized and committed OS data to persistent disk.\x1b[0m");
+        } else if (strcmp(argv[0], "portable") == 0 || strcmp(argv[0], "usb") == 0) {
+            char out[512] = "";
+            os_control(OS_CMD_PORTABLE_LIST, (long)out, sizeof(out), 0);
+            puts("=== Portable & Removable Storage Devices ===");
+            printf("%s", out);
+
+        /* ---- App Launcher ---- */
+        } else if (strcmp(argv[0], "app") == 0 || strcmp(argv[0], "launch") == 0) {
+            if (argc < 2) {
+                puts("Usage: app <name>");
+                puts("Available apps: Terminal, Files, Browser, About, Help, Sysinfo");
+            } else {
+                long res = os_control(OS_CMD_APP_LAUNCH, (long)argv[1], 0, 0);
+                if (res == 0) {
+                    printf("\x1b[1;32mLaunched app '%s'.\x1b[0m\n", argv[1]);
+                } else {
+                    printf("\x1b[1;31mUnknown app '%s'. Choose: Terminal, Files, Browser, About, Help, Sysinfo\x1b[0m\n", argv[1]);
+                }
+            }
+
+        /* ---- Theme Control ---- */
+        } else if (strcmp(argv[0], "theme") == 0) {
+            if (argc < 2) {
+                puts("Usage: theme <tokyo|emerald|amber|cyberpunk>");
+            } else {
+                int tid = -1;
+                if (strcmp(argv[1], "tokyo") == 0 || strcmp(argv[1], "sapphire") == 0) tid = 0;
+                else if (strcmp(argv[1], "emerald") == 0) tid = 1;
+                else if (strcmp(argv[1], "amber") == 0) tid = 2;
+                else if (strcmp(argv[1], "cyberpunk") == 0) tid = 3;
+
+                if (tid >= 0 && os_control(OS_CMD_SET_THEME, (long)argv[1], 0, 0) == 0) {
+                    printf("\x1b[1;32mDesktop theme switched to '%s' in real time.\x1b[0m\n", argv[1]);
+                } else {
+                    puts("\x1b[1;31mUnknown theme. Choose: tokyo, emerald, amber, cyberpunk\x1b[0m");
+                }
+            }
+
+        /* ---- Mouse Sensitivity Control ---- */
+        } else if (strcmp(argv[0], "mouse") == 0) {
+            if (argc == 1) {
+                long sens = os_control(OS_CMD_GET_MOUSE, 0, 0, 0);
+                printf("Current mouse sensitivity: %ld / 10\n", sens);
+            } else {
+                int sens = simple_atoi(argv[1]);
+                if (sens >= 1 && sens <= 10) {
+                    os_control(OS_CMD_SET_MOUSE, sens, 0, 0);
+                    printf("\x1b[1;32mMouse sensitivity set to %d / 10 (200Hz smooth polling).\x1b[0m\n", sens);
+                } else {
+                    puts("Usage: mouse <1-10>");
+                }
+            }
+
+        /* ---- System & Diagnostics Commands ---- */
         } else if (strcmp(argv[0], "ps") == 0) {
             ps();
         } else if (strcmp(argv[0], "uptime") == 0) {
             printf("Uptime: %d seconds\n", uptime());
+        } else if (strcmp(argv[0], "free") == 0 || strcmp(argv[0], "mem") == 0) {
+            meminfo();
+        } else if (strcmp(argv[0], "kill") == 0) {
+            if (argc < 2) {
+                puts("Usage: kill <pid>");
+            } else {
+                int pid = simple_atoi(argv[1]);
+                if (kill(pid, 15) == 0) {
+                    printf("Process %d terminated.\n", pid);
+                } else {
+                    printf("Failed to kill process %d.\n", pid);
+                }
+            }
+        } else if (strcmp(argv[0], "echo") == 0) {
+            for (int i = 1; i < argc; i++) {
+                printf("%s%s", argv[i], (i + 1 < argc) ? " " : "");
+            }
+            putchar('\n');
+        } else if (strcmp(argv[0], "reboot") == 0) {
+            puts("Rebooting system...");
+            reboot();
+        } else if (strcmp(argv[0], "shutdown") == 0 || strcmp(argv[0], "poweroff") == 0) {
+            puts("Shutting down system...");
+            shutdown();
         } else if (strcmp(argv[0], "exit") == 0) {
             break;
         } else {
-            /* Try to run it via fork/exec */
+            /* Try executing external binary in /bin */
             char path[128];
             if (argv[0][0] == '/') {
-                strcpy(path, argv[0]);
+                strncpy(path, argv[0], sizeof(path) - 1);
+                path[sizeof(path) - 1] = '\0';
             } else {
                 snprintf(path, sizeof(path), "/bin/%s", argv[0]);
             }
-            
+
             int pid = exec(path);
             if (pid < 0) {
-                printf("Unknown command or failed to execute: %s\n", argv[0]);
+                printf("\x1b[1;31mUnknown command: '%s'. Type 'help' for command list.\x1b[0m\n", argv[0]);
             } else {
                 int status;
                 wait(pid, &status);

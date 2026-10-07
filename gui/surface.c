@@ -117,8 +117,21 @@ void surface_rect_outline(surface_t *s, const rect_t *r, color_t c, int thicknes
     surface_fill_rect(s, &right, c);
 }
 
-/* Rounded corners via a quarter-disc test per pixel in the corner boxes only;
- * the body of the rect is a plain fill. */
+void surface_pixel_blend(surface_t *s, int x, int y, color_t c, uint32_t alpha) {
+    if (!s || x < 0 || y < 0 || x >= s->w || y >= s->h || alpha == 0) return;
+    if (alpha >= 255) {
+        s->pixels[y * s->w + x] = c;
+        return;
+    }
+    uint32_t d = s->pixels[y * s->w + x];
+    uint32_t inv = 256 - alpha;
+    uint32_t r = (((d >> 16) & 0xFF) * inv + (((c >> 16) & 0xFF) * alpha)) >> 8;
+    uint32_t g = (((d >> 8) & 0xFF) * inv + (((c >> 8) & 0xFF) * alpha)) >> 8;
+    uint32_t b = ((d & 0xFF) * inv + ((c & 0xFF) * alpha)) >> 8;
+    s->pixels[y * s->w + x] = (r << 16) | (g << 8) | b;
+}
+
+/* Rounded corners with 4x subpixel coverage antialiasing */
 void surface_rounded_fill(surface_t *s, const rect_t *r, int radius, color_t c) {
     if (!s || rect_is_empty(r)) return;
     if (radius <= 0) { surface_fill_rect(s, r, c); return; }
@@ -132,7 +145,8 @@ void surface_rounded_fill(surface_t *s, const rect_t *r, int radius, color_t c) 
     surface_fill_rect(s, &top, c);
     surface_fill_rect(s, &bot, c);
 
-    int rr = radius * radius;
+    int r4 = radius * 4;
+    int r4_sq = r4 * r4;
     int corners[4][2] = {
         { r->x + radius, r->y + radius },
         { r->x + r->w - radius - 1, r->y + radius },
@@ -145,8 +159,18 @@ void surface_rounded_fill(surface_t *s, const rect_t *r, int radius, color_t c) 
             for (int dx = 0; dx < radius; dx++) {
                 int px = (k & 1) ? (cx + radius - 1 - dx) : (cx + dx);
                 int py = (k & 2) ? (cy + radius - 1 - dy) : (cy + dy);
-                int ex = px - cx, ey = py - cy;
-                if (ex * ex + ey * ey <= rr) surface_pixel(s, px, py, c);
+                int sx = (px - cx) * 4;
+                int sy = (py - cy) * 4;
+                int cov = 0;
+                if ((sx + 1) * (sx + 1) + (sy + 1) * (sy + 1) <= r4_sq) cov++;
+                if ((sx + 3) * (sx + 3) + (sy + 1) * (sy + 1) <= r4_sq) cov++;
+                if ((sx + 1) * (sx + 1) + (sy + 3) * (sy + 3) <= r4_sq) cov++;
+                if ((sx + 3) * (sx + 3) + (sy + 3) * (sy + 3) <= r4_sq) cov++;
+                if (cov == 4) {
+                    surface_pixel(s, px, py, c);
+                } else if (cov > 0) {
+                    surface_pixel_blend(s, px, py, c, cov * 64 - 1);
+                }
             }
         }
     }
@@ -169,9 +193,6 @@ void surface_rounded_outline(surface_t *s, const rect_t *r, int radius, color_t 
     int inner = radius - thickness;
     int ri = inner > 0 ? inner * inner : 0;
 
-    /* Corner arcs: keep pixels whose distance from the arc centre falls in the
-     * [inner,outer] band, then extrude each one `thickness` steps toward the
-     * rect's centre so the ring has real width. */
     for (int q = 0; q < 4; q++) {
         int sx = (q & 1) ? -1 : 1;      /* outward direction on x */
         int sy = (q & 2) ? -1 : 1;      /* outward direction on y */
@@ -186,8 +207,13 @@ void surface_rounded_outline(surface_t *s, const rect_t *r, int radius, color_t 
                 for (int t = 0; t < thickness; t++) {
                     int qx = px - sx * t, qy = py - sy * t;
                     if (qx >= r->x && qx < r->x + r->w &&
-                        qy >= r->y && qy < r->y + r->h)
-                        surface_pixel(s, qx, qy, c);
+                        qy >= r->y && qy < r->y + r->h) {
+                        if (d2 >= ro - radius) {
+                            surface_pixel_blend(s, qx, qy, c, 210);
+                        } else {
+                            surface_pixel(s, qx, qy, c);
+                        }
+                    }
                 }
             }
         }

@@ -52,6 +52,27 @@ extern int errno;
 #define SYS_GUI_BLIT_SURFACE   41
 #define SYS_GUI_INVALIDATE     42
 #define SYS_GUI_GET_FB_INFO    43
+#define SYS_OS_CONTROL         65
+
+/* OS control command opcodes */
+#define OS_CMD_AUTH_LOGIN     1
+#define OS_CMD_AUTH_ADD_USER  2
+#define OS_CMD_AUTH_PASSWD    3
+#define OS_CMD_AUTH_WHOAMI    4
+#define OS_CMD_AUTH_USERS     5
+#define OS_CMD_AUTH_LOCK      6
+#define OS_CMD_AUTH_LOGOUT    7
+#define OS_CMD_WM_LIST        10
+#define OS_CMD_WM_CLOSE       11
+#define OS_CMD_WM_FOCUS       12
+#define OS_CMD_WM_TILE        13
+#define OS_CMD_APP_LAUNCH     14
+#define OS_CMD_SET_THEME      15
+#define OS_CMD_SET_MOUSE      16
+#define OS_CMD_GET_MOUSE      17
+#define OS_CMD_STORAGE_INFO   20
+#define OS_CMD_STORAGE_SYNC   21
+#define OS_CMD_PORTABLE_LIST  22
 
 /* Signal handling syscalls */
 #define SYS_SIGACTION      100
@@ -61,6 +82,7 @@ extern int errno;
 /* Syscall wrapper (SYSCALL instruction, SysV argument slots).
  * Returns -1 and sets errno on negative-errno results. */
 long _syscall(long num, long a1, long a2, long a3, long a4, long a5, long a6);
+long os_control(long cmd, long a1, long a2, long a3);
 
 /* Standard functions */
 void exit(int code);

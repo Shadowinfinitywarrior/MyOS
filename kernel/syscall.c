@@ -14,6 +14,11 @@
 #include "../fs/vfs.h"
 #include "vtty.h"
 #include "../include/rust_gui.h"
+#include "../gui/wm.h"
+#include "../gui/desktop.h"
+#include "../gui/login.h"
+#include "../drivers/mouse.h"
+#include "storage.h"
 
 extern char keyboard_getchar(void);
 
@@ -839,6 +844,155 @@ static int32_t sys_sigreturn_wrapper(uint64_t saved_regs_ptr, uint64_t a2, uint6
     return sys_sigreturn((registers_t *)(uintptr_t)saved_regs_ptr);
 }
 
+/* --- OS Control Syscall --- */
+static int32_t sys_os_control(uint64_t cmd, uint64_t a1, uint64_t a2, uint64_t a3,
+                              uint64_t a4, uint64_t a5) {
+    (void)a3; (void)a4; (void)a5;
+    switch ((int)cmd) {
+        case OS_CMD_AUTH_LOGIN: {
+            char u[32], p[32];
+            if (copy_str_from_user(u, sizeof(u), (const char *)(uintptr_t)a1) != 0) return -1;
+            if (copy_str_from_user(p, sizeof(p), (const char *)(uintptr_t)a2) != 0) return -1;
+            if (auth_validate(u, p)) {
+                auth_set_current_user(u);
+                login_unlock();
+                return 0;
+            }
+            return -1;
+        }
+        case OS_CMD_AUTH_ADD_USER: {
+            char u[32], p[32];
+            if (copy_str_from_user(u, sizeof(u), (const char *)(uintptr_t)a1) != 0) return -1;
+            if (copy_str_from_user(p, sizeof(p), (const char *)(uintptr_t)a2) != 0) return -1;
+            return auth_add_user(u, p) ? 0 : -1;
+        }
+        case OS_CMD_AUTH_PASSWD: {
+            char u[32], p[32];
+            if (copy_str_from_user(u, sizeof(u), (const char *)(uintptr_t)a1) != 0) return -1;
+            if (copy_str_from_user(p, sizeof(p), (const char *)(uintptr_t)a2) != 0) return -1;
+            return auth_change_password(u, p) ? 0 : -1;
+        }
+        case OS_CMD_AUTH_WHOAMI: {
+            extern const char *auth_get_current_user(void);
+            const char *cur = auth_get_current_user();
+            if (!cur) cur = "myos";
+            if (copy_to_user((void *)(uintptr_t)a1, cur, strlen(cur) + 1) != 0) return -1;
+            return 0;
+        }
+        case OS_CMD_AUTH_USERS: {
+            extern int auth_get_users(char names[][32], int max_users);
+            char names[16][32];
+            int cnt = auth_get_users(names, 16);
+            char out[512] = "";
+            for (int i = 0; i < cnt; i++) {
+                strcat(out, names[i]);
+                if (i < cnt - 1) strcat(out, " ");
+            }
+            if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            return cnt;
+        }
+        case OS_CMD_AUTH_LOCK:
+        case OS_CMD_AUTH_LOGOUT: {
+            login_lock();
+            return 0;
+        }
+        case OS_CMD_WM_LIST: {
+            int n = wm_window_count();
+            char out[512] = "";
+            for (int i = 0; i < n; i++) {
+                wm_window_t *w = wm_window_by_creation(i);
+                if (w) {
+                    char item[64];
+                    snprintf(item, sizeof(item), "[%d] %s%s\n", (int)w->id, w->title, w->focused ? " *" : "");
+                    strcat(out, item);
+                }
+            }
+            if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            return n;
+        }
+        case OS_CMD_WM_CLOSE: {
+            char title[64];
+            if (copy_str_from_user(title, sizeof(title), (const char *)(uintptr_t)a1) != 0) return -1;
+            wm_window_t *w = wm_find(title);
+            if (w) {
+                wm_destroy(w);
+                return 0;
+            }
+            return -1;
+        }
+        case OS_CMD_WM_FOCUS: {
+            char title[64];
+            if (copy_str_from_user(title, sizeof(title), (const char *)(uintptr_t)a1) != 0) return -1;
+            wm_window_t *w = wm_find(title);
+            if (w) {
+                wm_focus(w);
+                return 0;
+            }
+            return -1;
+        }
+        case OS_CMD_WM_TILE: {
+            wm_tile_all();
+            return 0;
+        }
+        case OS_CMD_APP_LAUNCH: {
+            char name[32];
+            if (copy_str_from_user(name, sizeof(name), (const char *)(uintptr_t)a1) != 0) return -1;
+            if (desktop_launch(name)) return 0;
+            return -1;
+        }
+        case OS_CMD_SET_THEME: {
+            char name[32];
+            if (copy_str_from_user(name, sizeof(name), (const char *)(uintptr_t)a1) != 0) return -1;
+            desktop_set_theme(name);
+            return 0;
+        }
+        case OS_CMD_SET_MOUSE: {
+            mouse_set_sensitivity((uint8_t)a1);
+            return 0;
+        }
+        case OS_CMD_GET_MOUSE: {
+            return (int32_t)mouse_get_sensitivity();
+        }
+        case OS_CMD_STORAGE_INFO: {
+            storage_device_info_t devs[4];
+            int n = storage_get_devices(devs, 4);
+            char out[512] = "";
+            for (int i = 0; i < n; i++) {
+                char line[128];
+                snprintf(line, sizeof(line), "%s on %s (%s, %u MB free)\n",
+                         devs[i].device_name, devs[i].mount_point, devs[i].fs_type,
+                         (uint32_t)(devs[i].free_bytes / (1024 * 1024)));
+                strcat(out, line);
+            }
+            if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            return n;
+        }
+        case OS_CMD_STORAGE_SYNC: {
+            storage_save_users();
+            return 0;
+        }
+        case OS_CMD_PORTABLE_LIST: {
+            storage_device_info_t devs[4];
+            int n = storage_get_devices(devs, 4);
+            char out[512] = "";
+            for (int i = 0; i < n; i++) {
+                if (devs[i].is_portable) {
+                    char line[128];
+                    snprintf(line, sizeof(line), "PORTABLE: %s [%s] -> %s (%u MB)\n",
+                             devs[i].device_name, devs[i].fs_type, devs[i].mount_point,
+                             (uint32_t)(devs[i].total_bytes / (1024 * 1024)));
+                    strcat(out, line);
+                }
+            }
+            if (out[0] == '\0') strcpy(out, "No portable devices attached.\n");
+            if (copy_to_user((void *)(uintptr_t)a1, out, strlen(out) + 1) != 0) return -1;
+            return 0;
+        }
+        default:
+            return -1;
+    }
+}
+
 void syscall_init(void) {
     memset(syscall_table, 0, sizeof(syscall_table));
 
@@ -848,6 +1002,7 @@ void syscall_init(void) {
     syscall_table[SYS_WRITE]   = sys_write;
     syscall_table[SYS_OPEN]    = sys_open;
     syscall_table[SYS_CLOSE]   = sys_close;
+    syscall_table[SYS_OS_CONTROL] = sys_os_control;
     syscall_table[SYS_GETPID]  = sys_getpid;
     syscall_table[SYS_WAIT]    = sys_wait;
     syscall_table[SYS_KILL]    = sys_kill;

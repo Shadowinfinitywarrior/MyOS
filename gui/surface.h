@@ -35,6 +35,7 @@ void surface_rounded_outline(surface_t *s, const rect_t *r, int radius, color_t 
 void surface_horizontal_gradient(surface_t *s, const rect_t *r, color_t left, color_t right);
 void surface_blit_surface(surface_t *dst, const surface_t *src, int x, int y);
 void surface_pixel(surface_t *s, int x, int y, color_t c);
+void surface_pixel_blend(surface_t *s, int x, int y, color_t c, uint32_t alpha);
 
 /* Present a screen-space rect of this surface at (dx,dy) on the back buffer. */
 void surface_present(surface_t *s, int dx, int dy, const rect_t *src);
