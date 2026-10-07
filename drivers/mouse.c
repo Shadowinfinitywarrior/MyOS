@@ -313,14 +313,17 @@ static void mouse_callback(registers_t *regs) {
 
     /* Decode standard 3-byte packet */
     uint8_t byte0 = mouse_bytes[0];
-    int dx = (int)mouse_bytes[1];
-    int dy = (int)mouse_bytes[2];
+
+    /* Discard packet if overflow occurred to prevent jumping */
+    if (byte0 & 0xC0) {
+        return;
+    }
+
+    /* 9-bit two's complement sign extension from byte0 */
+    int dx = (int)mouse_bytes[1] - ((byte0 & 0x10) ? 256 : 0);
+    int dy = (int)mouse_bytes[2] - ((byte0 & 0x20) ? 256 : 0);
     int8_t scroll = 0;
     int8_t scroll_h = 0;
-
-    /* Sign from byte0, magnitude is unsigned */
-    if (byte0 & 0x10) dx = -dx;
-    if (byte0 & 0x20) dy = -dy;
 
     /* Handle scroll wheel (4th byte in IntelliMouse) */
     if (mouse.scroll_supported && !mouse.five_button) {

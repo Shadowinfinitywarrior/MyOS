@@ -3,6 +3,7 @@
 #include "theme.h"
 #include "text.h"
 #include "cursor.h"
+#include "wm.h"
 #include "../lib/string.h"
 #include "../kernel/timer.h"
 #include "../kernel/storage.h"
@@ -150,6 +151,9 @@ void login_unlock(void) {
     system_locked = false;
     input_pass[0] = '\0';
     error_message[0] = '\0';
+    wm_window_t *term = wm_find("MyOS Terminal");
+    if (!term) term = wm_find("Terminal");
+    if (term) wm_focus(term);
 }
 
 /* Helper functions for direct drawing onto the backbuffer */

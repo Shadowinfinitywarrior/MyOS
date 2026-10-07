@@ -1217,7 +1217,7 @@ void desktop_tick(void) {
     while (input_poll(&ev)) {
         if (ev.type == EV_MOUSE_MOVE) {
             desktop_hover(ev.x, ev.y);
-            if (wm_capture_active()) wm_handle_event(&ev);
+            wm_handle_event(&ev);
             continue;
         }
         if (ev.type == EV_MOUSE_DOWN) {
@@ -1291,6 +1291,8 @@ void desktop_tick(void) {
     if (!bb) return;
     int stride = fb_get_stride();
 
+    cursor_erase();
+
     if (!wallpaper_done) draw_wallpaper();
     blit_wallpaper(bb, stride);
 
@@ -1304,12 +1306,35 @@ void desktop_tick(void) {
     draw_left_nav(bb, stride);
     draw_dock(bb, stride);
     draw_menu(bb, stride);
+
+    /* Track component hover damages */
+    static int prev_dock_hot = -1;
+    static int prev_lnav_hot = -1;
+    static int prev_menu_hot = -1;
+    static bool prev_menu_open = false;
+
+    if (dock_hot != prev_dock_hot) {
+        fb_add_damage(dock_x - 10, dock_y - 10, dock_w + 20, dock_h + 20);
+        prev_dock_hot = dock_hot;
+    }
+    if (lnav_hot != prev_lnav_hot) {
+        fb_add_damage(lnav_x - 10, lnav_y - 10, lnav_w + 20, lnav_h + 20);
+        prev_lnav_hot = lnav_hot;
+    }
+    if (menu_hot != prev_menu_hot || menu_open != prev_menu_open) {
+        fb_add_damage(8, scr_h - 350 - 64, 280, 350);
+        prev_menu_hot = menu_hot;
+        prev_menu_open = menu_open;
+    }
+
+    if (wm_capture_active()) {
+        fb_add_damage(0, 0, scr_w, scr_h);
+    }
+
     cursor_draw();
 
-    fb_add_damage(0, 0, scr_w, scr_h);
-
     static int frame_no = 0;
-    if (frame_no++ < 3) {
+    if (frame_no++ < 5) {
         fb_flush_all();
     } else {
         fb_flush();

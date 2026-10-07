@@ -139,6 +139,23 @@ static int32_t sys_read(uint64_t fd, uint64_t buf_ptr, uint64_t count,
                     process_yield();
                     continue;
                 }
+
+                /* Canonical mode: convert carriage return to newline */
+                if (c == '\r') {
+                    c = '\n';
+                }
+
+                /* Canonical line editing: backspace / delete */
+                if (c == '\b' || (uint8_t)c == 0x7F || c == 8) {
+                    if (got > 0) {
+                        got--;
+                        vtty_putc(v, '\b');
+                        vtty_putc(v, ' ');
+                        vtty_putc(v, '\b');
+                    }
+                    continue;
+                }
+
                 /* Echo so the typed line appears in the terminal. */
                 vtty_putc(v, c);
                 bounce[got++] = (uint8_t)c;

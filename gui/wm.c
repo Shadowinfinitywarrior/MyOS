@@ -412,8 +412,6 @@ bool wm_handle_event(const gui_event_t *e) {
                 }
             }
             if (!w) return false;
-        } else {
-            wm_focus(w);
         }
         if (w->flags & WF_DRAGGING) {
             w->frame.x = w->orig_x + (e->x - w->grab_px);

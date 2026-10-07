@@ -13,13 +13,58 @@ static int simple_atoi(const char *s) {
     return res;
 }
 
+static inline int is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static void sanitize_input(char *buf) {
+    if (!buf) return;
+    char clean[MAX_INPUT];
+    int w = 0;
+    for (int r = 0; buf[r] && w < MAX_INPUT - 1; r++) {
+        unsigned char c = (unsigned char)buf[r];
+        if (c == 0x1b) {
+            if (buf[r + 1] == '[') {
+                r += 2;
+                while (buf[r] && !((buf[r] >= '@' && buf[r] <= '~'))) {
+                    r++;
+                }
+            }
+            continue;
+        }
+        if (c == '\b' || c == 0x7F || c == 8) {
+            if (w > 0) w--;
+            continue;
+        }
+        if (c >= ' ' || c == '\t') {
+            clean[w++] = (char)c;
+        }
+    }
+    clean[w] = '\0';
+    strcpy(buf, clean);
+}
+
+static int cmd_is(const char *cmd, const char *target) {
+    if (!cmd || !target) return 0;
+    while (*cmd && *target) {
+        char c1 = *cmd;
+        char c2 = *target;
+        if (c1 >= 'A' && c1 <= 'Z') c1 += 32;
+        if (c2 >= 'A' && c2 <= 'Z') c2 += 32;
+        if (c1 != c2) return 0;
+        cmd++;
+        target++;
+    }
+    return (*cmd == '\0' && *target == '\0');
+}
+
 static int parse_args(char *line, char **argv) {
     int argc = 0;
     while (*line && argc < MAX_ARGS - 1) {
-        while (*line == ' ') line++;
+        while (*line && is_space(*line)) line++;
         if (!*line) break;
         argv[argc++] = line;
-        while (*line && *line != ' ') line++;
+        while (*line && !is_space(*line)) line++;
         if (*line) {
             *line = '\0';
             line++;
@@ -112,17 +157,22 @@ int main(void) {
         input[n] = '\0';
         if (n == 0) continue;
 
+        /* Clean up escape sequences, backspaces, and control characters */
+        sanitize_input(input);
+        if (input[0] == '\0') continue;
+
         int argc = parse_args(input, argv);
         if (argc == 0 || !argv[0]) continue;
 
         /* ---- Help & Info ---- */
-        if (strcmp(argv[0], "help") == 0) {
+        if (cmd_is(argv[0], "help") || strcmp(argv[0], "?") == 0 ||
+            strcmp(argv[0], "--help") == 0 || strcmp(argv[0], "-h") == 0) {
             show_help();
-        } else if (strcmp(argv[0], "clear") == 0) {
+        } else if (cmd_is(argv[0], "clear")) {
             for (int k = 0; k < 32; k++) putchar('\n');
-        } else if (strcmp(argv[0], "fetch") == 0 || strcmp(argv[0], "sysinfo") == 0) {
+        } else if (cmd_is(argv[0], "fetch") || cmd_is(argv[0], "sysinfo")) {
             show_banner();
-        } else if (strcmp(argv[0], "uname") == 0) {
+        } else if (cmd_is(argv[0], "uname")) {
             puts("MyOS 1.0.0-smp x86_64 GNU/MyOS");
 
         /* ---- Authentication Commands ---- */

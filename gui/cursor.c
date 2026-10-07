@@ -174,11 +174,19 @@ static cursor_shape_t shape = CUR_ARROW;
 static int hot_x, hot_y;
 static int last_x = -1, last_y = -1;
 
+#define UNDER_W (CURSOR_W + 16)
+#define UNDER_H (CURSOR_H + 16)
+static uint32_t under_cursor[UNDER_H * UNDER_W];
+static int under_x = -1, under_y = -1;
+static int under_w = 0, under_h = 0;
+static bool under_valid = false;
+
 void cursor_init(void) {
     shape = CUR_ARROW;
     hot_x = 0;
     hot_y = 0;
     last_x = last_y = -1;
+    under_valid = false;
 }
 
 void cursor_set_shape(cursor_shape_t s) { shape = s; }
@@ -204,6 +212,24 @@ static inline void put_blend(int x, int y, color_t c, uint32_t alpha, uint32_t *
 }
 
 void cursor_erase(void) {
+    if (!under_valid) return;
+    uint32_t *bb = fb_get_backbuffer();
+    if (!bb) { under_valid = false; return; }
+    int stride = fb_get_stride();
+    fb_info_t *info = fb_get_info();
+    if (!info) { under_valid = false; return; }
+
+    for (int r = 0; r < under_h; r++) {
+        int py = under_y + r;
+        if (py < 0 || py >= (int)info->height) continue;
+        for (int c = 0; c < under_w; c++) {
+            int px = under_x + c;
+            if (px < 0 || px >= (int)info->width) continue;
+            bb[(size_t)py * (size_t)stride + px] = under_cursor[r * under_w + c];
+        }
+    }
+    fb_add_damage(under_x, under_y, under_w, under_h);
+    under_valid = false;
     last_x = last_y = -1;
 }
 
@@ -211,10 +237,44 @@ void cursor_draw(void) {
     uint32_t *bb = fb_get_backbuffer();
     if (!bb) return;
     int stride = fb_get_stride();
+    fb_info_t *info = fb_get_info();
+    if (!info) return;
+
     int x = input_mouse_x() - hot_x;
     int y = input_mouse_y() - hot_y;
+
+    if (under_valid && x == last_x && y == last_y) {
+        return;
+    }
+
+    if (under_valid) {
+        cursor_erase();
+    }
+
     last_x = x;
     last_y = y;
+
+    int sx = x - 2;
+    int sy = y - 2;
+    int sw = CURSOR_W + 8;
+    int sh = CURSOR_H + 8;
+    if (sx < 0) { sw += sx; sx = 0; }
+    if (sy < 0) { sh += sy; sy = 0; }
+    if (sx + sw > (int)info->width) sw = (int)info->width - sx;
+    if (sy + sh > (int)info->height) sh = (int)info->height - sy;
+    if (sw <= 0 || sh <= 0 || sw > UNDER_W || sh > UNDER_H) return;
+
+    under_x = sx;
+    under_y = sy;
+    under_w = sw;
+    under_h = sh;
+
+    for (int r = 0; r < sh; r++) {
+        for (int c = 0; c < sw; c++) {
+            under_cursor[r * sw + c] = bb[(size_t)(sy + r) * (size_t)stride + (sx + c)];
+        }
+    }
+    under_valid = true;
 
     const char **map = shape_for(shape);
 
@@ -243,6 +303,5 @@ void cursor_draw(void) {
             }
         }
     }
-    /* The area under the old and new positions needs repainting. */
-    fb_add_damage(x - 4, y - 4, CURSOR_W + 8, CURSOR_H + 8);
+    fb_add_damage(sx, sy, sw, sh);
 }
