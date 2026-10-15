@@ -66,8 +66,12 @@ context_switch:
     ; registers on the old task's (soon-to-be-unmapped/freed) stack.
     mov rsp, [r11 + 64]
 
-    ; Restore rflags
+    ; Restore rflags with IF masked out:
+    ; Context switch itself must never enable interrupts before jumping to rip.
+    ; If the resuming task had IF set, IF will be restored by the scheduler_schedule
+    ; epilogue (for voluntary switches) or by iretq (for preempted interrupts).
     mov rax, [r11 + 80]
+    and rax, ~0x200
     push rax
     popfq
 

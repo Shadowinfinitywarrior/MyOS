@@ -24,20 +24,16 @@
 #include "../kernel/power_net.h"
 #include "desktop.h"
 
-/* ---- shared chrome ------------------------------------------------------ */
+#include "glass.h"
 
-/* A titled "card" panel inside a window, used by the info apps. */
+/* A titled "card" panel inside a window, styled with modern glassmorphism */
 static void panel(surface_t *s, const rect_t *area, const char *title) {
-    surface_rounded_fill(s, area, 8, RGB(0x1B, 0x20, 0x28));
-    surface_rounded_outline(s, area, 8, RGB(0x30, 0x36, 0x3D), 1);
-    rect_t hdr = { area->x + 1, area->y + 1, area->w - 2, 28 };
-    surface_rounded_fill(s, &hdr, 7, RGB(0x21, 0x27, 0x33));
-    text_draw(s, font_bold(), area->x + 12, area->y + 7, title, TH_TITLE_TEXT);
+    glass_surface_card(s, area, title);
 }
 
 static int kv_line(surface_t *s, int y, const char *k, const char *v, int x, int w) {
-    text_draw(s, font_ui(), x, y, k, TH_TEXT_DIM);
-    text_draw(s, font_mono(), x + w - text_width(font_mono(), v), y, v, TH_TEXT);
+    text_draw(s, font_ui(), x, y, k, TH_TEXT_SECONDARY);
+    text_draw(s, font_mono(), x + w - text_width(font_mono(), v), y, v, TH_TEXT_PRIMARY);
     return y + 19;
 }
 
@@ -50,120 +46,343 @@ static void path_join(char *out, int cap, const char *dir, const char *name) {
     out[n] = 0;
 }
 
-/* ---- File explorer ------------------------------------------------------- */
+/* ---- Modern File Manager (NovaFS & Debian Package Integration) --------- */
+
+extern int pkg_install_deb_file(const char *filepath);
+
+typedef struct {
+    const char *name;
+    const char *path;
+    const char *badge;
+    color_t     color;
+} file_place_t;
+
+static const file_place_t file_places[] = {
+    { "NovaFS",   "/nova",                   "NOVA", RGB(0x00, 0xE5, 0xFF) },
+    { "Root",     "/",                       "ROOT", RGB(0x7A, 0xA2, 0xF7) },
+    { "Binaries", "/bin",                    "BIN",  RGB(0x2E, 0xCC, 0x71) },
+    { "Packages", "/var/cache/apt/archives", "DEB",  RGB(0xE7, 0x4C, 0x3C) },
+    { "Docs",     "/nova/docs",              "DOC",  RGB(0xF1, 0xC4, 0x0F) },
+    { "Devices",  "/dev",                    "DEV",  RGB(0xBB, 0x9A, 0xF7) }
+};
+#define FILE_PLACES_COUNT 6
 
 typedef struct files_state {
     char        path[128];
     vfs_node_t *node;
     int         sel;
+    int         sidebar_sel;
+    uint32_t    last_click_time;
+    int         last_click_row;
+    char        status_msg[96];
+    char        selected_filename[64];
+    bool        selected_is_deb;
 } files_state_t;
 
 static void files_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     files_state_t *st = (files_state_t *)w->user;
-    surface_fill_rect(s, c, TH_WIN_BG_FOCUS);
+    if (!st) return;
 
-    /* Breadcrumb / path bar. */
-    rect_t hdr = { c->x, c->y, c->w, 30 };
-    surface_fill_rect(s, &hdr, TH_TITLE);
-    text_draw(s, font_bold(), c->x + 12, c->y + 7, "Files", TH_TITLE_TEXT);
-    rect_t pathbar = { c->x + 70, c->y + 5, c->w - 84, 20 };
-    surface_rounded_fill(s, &pathbar, 5, TH_ACCENT_SOFT);
-    text_draw(s, font_mono(), c->x + 80, c->y + 8, st->path, TH_TEXT);
+    /* Base Window Background */
+    surface_fill_rect(s, c, RGB(0x13, 0x16, 0x20));
+
+    /* 1. Header & Navigation Toolbar (y: 0 to 36) */
+    rect_t hdr = { c->x, c->y, c->w, 36 };
+    surface_fill_rect(s, &hdr, RGB(0x1A, 0x1F, 0x2C));
+    rect_t hdr_line = { c->x, c->y + 35, c->w, 1 };
+    surface_fill_rect(s, &hdr_line, RGB(0x2B, 0x33, 0x47));
+
+    /* "Up" Navigation Button */
+    rect_t btn_up = { c->x + 8, c->y + 6, 32, 24 };
+    surface_rounded_fill(s, &btn_up, 4, RGB(0x25, 0x2C, 0x3D));
+    surface_rounded_outline(s, &btn_up, 4, RGB(0x3B, 0x46, 0x5E), 1);
+    text_draw(s, font_bold(), btn_up.x + 10, btn_up.y + 4, "^", RGB(0x00, 0xD2, 0xFF));
+
+    /* Refresh Button */
+    rect_t btn_ref = { c->x + 44, c->y + 6, 28, 24 };
+    surface_rounded_fill(s, &btn_ref, 4, RGB(0x25, 0x2C, 0x3D));
+    surface_rounded_outline(s, &btn_ref, 4, RGB(0x3B, 0x46, 0x5E), 1);
+    text_draw(s, font_bold(), btn_ref.x + 8, btn_ref.y + 4, "o", RGB(0x2E, 0xCC, 0x71));
+
+    /* Path Breadcrumb Box */
+    int path_w = c->w - 200;
+    if (path_w < 120) path_w = 120;
+    rect_t pathbar = { c->x + 76, c->y + 6, path_w, 24 };
+    surface_rounded_fill(s, &pathbar, 5, RGB(0x0F, 0x12, 0x19));
+    surface_rounded_outline(s, &pathbar, 5, RGB(0x2F, 0x3A, 0x50), 1);
+    text_draw(s, font_mono(), pathbar.x + 8, pathbar.y + 5, st->path, RGB(0x00, 0xE5, 0xFF));
+
+    /* "Install .deb" Action Button */
+    rect_t btn_inst = { c->x + 80 + path_w, c->y + 6, c->w - (88 + path_w), 24 };
+    if (btn_inst.w > 40) {
+        color_t inst_bg = st->selected_is_deb ? RGB(0x1B, 0x6E, 0x3E) : RGB(0x22, 0x28, 0x38);
+        color_t inst_txt = st->selected_is_deb ? RGB(0x52, 0xE8, 0x8C) : RGB(0x6E, 0x7E, 0x94);
+        surface_rounded_fill(s, &btn_inst, 4, inst_bg);
+        surface_rounded_outline(s, &btn_inst, 4, st->selected_is_deb ? RGB(0x2E, 0xCC, 0x71) : RGB(0x35, 0x40, 0x54), 1);
+        text_draw(s, font_bold(), btn_inst.x + (btn_inst.w - 76) / 2, btn_inst.y + 5, "Install .deb", inst_txt);
+    }
+
+    /* 2. Left Places / Bookmarks Sidebar (Width: 140px) */
+    int sb_w = 140;
+    rect_t sidebar = { c->x, c->y + 36, sb_w, c->h - 60 };
+    surface_fill_rect(s, &sidebar, RGB(0x15, 0x18, 0x22));
+    rect_t sb_line = { c->x + sb_w - 1, c->y + 36, 1, c->h - 60 };
+    surface_fill_rect(s, &sb_line, RGB(0x25, 0x2D, 0x3D));
+
+    text_draw(s, font_bold(), c->x + 12, c->y + 46, "PLACES", RGB(0x6A, 0x7B, 0x94));
+
+    int s_y = c->y + 66;
+    for (int i = 0; i < FILE_PLACES_COUNT; i++) {
+        rect_t item = { c->x + 6, s_y, sb_w - 12, 26 };
+        bool active = (strcmp(st->path, file_places[i].path) == 0);
+        if (active) {
+            surface_rounded_fill(s, &item, 5, RGB(0x23, 0x2C, 0x3F));
+            surface_rounded_outline(s, &item, 5, RGB(0x00, 0xD2, 0xFF), 1);
+        }
+
+        /* Badge */
+        rect_t badge = { item.x + 6, item.y + 5, 34, 16 };
+        surface_rounded_fill(s, &badge, 3, RGB(0x10, 0x14, 0x1D));
+        text_draw(s, font_mono(), badge.x + 4, badge.y + 2, file_places[i].badge, file_places[i].color);
+
+        text_draw(s, font_ui(), item.x + 46, item.y + 5, file_places[i].name,
+                  active ? RGB(0xFF, 0xFF, 0xFF) : RGB(0x9E, 0xAE, 0xC4));
+
+        s_y += 30;
+    }
+
+    /* 3. Main File List View */
+    int main_x = c->x + sb_w;
+    int main_w = c->w - sb_w;
+    int main_y = c->y + 36;
+    int main_h = c->h - 60;
+
+    /* Column Header */
+    rect_t list_hdr = { main_x, main_y, main_w, 22 };
+    surface_fill_rect(s, &list_hdr, RGB(0x18, 0x1D, 0x28));
+    text_draw(s, font_bold(), main_x + 12, main_y + 4, "Name", RGB(0x76, 0x88, 0xA2));
+    text_draw(s, font_bold(), main_x + main_w - 180, main_y + 4, "Type", RGB(0x76, 0x88, 0xA2));
+    text_draw(s, font_bold(), main_x + main_w - 75, main_y + 4, "Size", RGB(0x76, 0x88, 0xA2));
 
     if (!st->node) {
-        text_draw(s, font_ui(), c->x + 16, c->y + 48, "Path not found", TH_TERM_ERR);
+        text_draw(s, font_ui(), main_x + 20, main_y + 36, "Cannot open directory", RGB(0xE7, 0x4C, 0x3C));
         return;
     }
 
-    int y = c->y + 42;
-    int max_rows = (c->h - 56) / 20;
+    int row_y = main_y + 26;
+    int row_h = 24;
+    int max_rows = (main_h - 30) / row_h;
     int idx = 0;
-    for (int i = 0; st->node->readdir && idx < max_rows; i++) {
+    int total_files = 0;
+
+    for (int i = 0; st->node->readdir; i++) {
         vfs_node_t *child = st->node->readdir(st->node, (uint32_t)i);
         if (!child) break;
-        if (idx == st->sel) {
-            rect_t hl = { c->x + 6, y - 3, c->w - 12, 20 };
-            surface_rounded_fill(s, &hl, 4, TH_ACCENT_SOFT);
-        }
-        bool dir = (child->flags & VFS_DIRECTORY) != 0;
-        /* Folder/file glyph drawn as a small filled shape. */
-        color_t ic = dir ? TH_ACCENT : TH_TEXT_DIM;
-        if (dir) {
-            rect_t folder = { c->x + 16, y + 2, 12, 9 };
-            surface_fill_rect(s, &folder, ic);
-            rect_t tab = { c->x + 17, y, 5, 3 };
-            surface_fill_rect(s, &tab, ic);
-        } else {
-            rect_t page = { c->x + 18, y, 9, 12 };
-            surface_rect_outline(s, &page, ic, 1);
-        }
-        text_draw(s, font_ui(), c->x + 38, y, child->name, TH_TEXT);
+        total_files++;
 
-        char sizebuf[24];
-        if (!dir) ui_bytes(child->length, sizebuf, sizeof(sizebuf));
-        else sizebuf[0] = 0;
-        if (sizebuf[0])
-            text_draw(s, font_mono(), c->x + c->w - 70, y, sizebuf, TH_TEXT_DIM);
-        y += 20;
-        idx++;
+        if (idx < max_rows) {
+            bool is_sel = (idx == st->sel);
+            if (is_sel) {
+                rect_t hl = { main_x + 4, row_y - 2, main_w - 8, row_h };
+                surface_rounded_fill(s, &hl, 4, RGB(0x22, 0x2E, 0x44));
+                surface_rounded_outline(s, &hl, 4, RGB(0x00, 0xD2, 0xFF), 1);
+                strncpy(st->selected_filename, child->name, sizeof(st->selected_filename) - 1);
+                st->selected_filename[sizeof(st->selected_filename) - 1] = '\0';
+                st->selected_is_deb = (strstr(child->name, ".deb") != NULL);
+            }
+
+            bool is_dir = (child->flags & VFS_DIRECTORY) != 0;
+            bool is_deb = (strstr(child->name, ".deb") != NULL);
+            bool is_exec = (!is_dir && !is_deb && (strcmp(st->path, "/bin") == 0 || strcmp(st->path, "/nova/apps") == 0));
+
+            /* Colorful File Type Icons */
+            if (is_dir) {
+                /* Folder Icon */
+                rect_t folder = { main_x + 12, row_y + 4, 14, 10 };
+                surface_rounded_fill(s, &folder, 2, RGB(0xFA, 0xB0, 0x05));
+                rect_t tab = { main_x + 13, row_y + 2, 6, 4 };
+                surface_fill_rect(s, &tab, RGB(0xFA, 0xB0, 0x05));
+            } else if (is_deb) {
+                /* Package Icon */
+                rect_t box = { main_x + 12, row_y + 2, 13, 13 };
+                surface_rounded_fill(s, &box, 2, RGB(0xE7, 0x4C, 0x3C));
+                text_draw(s, font_mono(), main_x + 14, row_y + 3, "P", RGB(0xFF, 0xFF, 0xFF));
+            } else if (is_exec) {
+                /* Executable Binary Icon */
+                rect_t exe = { main_x + 12, row_y + 2, 13, 13 };
+                surface_rounded_fill(s, &exe, 3, RGB(0x2E, 0xCC, 0x71));
+                text_draw(s, font_bold(), main_x + 15, row_y + 2, "*", RGB(0xFF, 0xFF, 0xFF));
+            } else {
+                /* Document File Icon */
+                rect_t page = { main_x + 13, row_y + 2, 11, 13 };
+                surface_rounded_fill(s, &page, 1, RGB(0x3B, 0x82, 0xF6));
+            }
+
+            /* Filename */
+            color_t name_color = is_deb ? RGB(0xFF, 0x7B, 0x72) : (is_dir ? RGB(0xFF, 0xE0, 0x82) : RGB(0xF0, 0xF6, 0xFC));
+            text_draw(s, font_ui(), main_x + 34, row_y + 2, child->name, name_color);
+
+            /* File Type String */
+            const char *type_str = is_dir ? "Folder" : (is_deb ? "Debian Package" : (is_exec ? "Executable" : "Document"));
+            text_draw(s, font_ui(), main_x + main_w - 180, row_y + 2, type_str, RGB(0x7D, 0x8D, 0xA2));
+
+            /* Size String */
+            char sizebuf[32];
+            if (!is_dir) {
+                if (child->length >= 1024 * 1024)
+                    snprintf(sizebuf, sizeof(sizebuf), "%u MB", child->length / (1024 * 1024));
+                else if (child->length >= 1024)
+                    snprintf(sizebuf, sizeof(sizebuf), "%u KB", child->length / 1024);
+                else
+                    snprintf(sizebuf, sizeof(sizebuf), "%u B", child->length);
+            } else {
+                strcpy(sizebuf, "--");
+            }
+            text_draw(s, font_mono(), main_x + main_w - 75, row_y + 2, sizebuf, RGB(0x7D, 0x8D, 0xA2));
+
+            row_y += row_h;
+            idx++;
+        }
     }
-    if (idx == 0)
-        text_draw(s, font_ui(), c->x + 16, c->y + 48, "(empty directory)", TH_TEXT_DIM);
+
+    if (total_files == 0) {
+        text_draw(s, font_ui(), main_x + 20, main_y + 36, "(Folder is empty)", RGB(0x6E, 0x7E, 0x94));
+    }
+
+    /* 4. Footer & Status Bar */
+    rect_t footer = { c->x, c->y + c->h - 24, c->w, 24 };
+    surface_fill_rect(s, &footer, RGB(0x16, 0x19, 0x24));
+    rect_t ft_line = { c->x, c->y + c->h - 24, c->w, 1 };
+    surface_fill_rect(s, &ft_line, RGB(0x28, 0x30, 0x42));
+
+    if (st->status_msg[0] != '\0') {
+        text_draw(s, font_bold(), c->x + 12, footer.y + 4, st->status_msg, RGB(0x2E, 0xCC, 0x71));
+    } else if (strncmp(st->path, "/nova", 5) == 0) {
+        text_draw(s, font_ui(), c->x + 12, footer.y + 4,
+                  "Volume: NovaFS Extent Volume (4 MB Unified Filesystem)", RGB(0x00, 0xD2, 0xFF));
+    } else {
+        text_draw(s, font_ui(), c->x + 12, footer.y + 4, "Ready", RGB(0x7D, 0x8D, 0xA2));
+    }
+
+    char count_str[32];
+    snprintf(count_str, sizeof(count_str), "%d items", total_files);
+    text_draw(s, font_ui(), c->x + c->w - 80, footer.y + 4, count_str, RGB(0x7D, 0x8D, 0xA2));
 }
 
 static bool files_event(wm_window_t *w, const gui_event_t *e) {
     files_state_t *st = (files_state_t *)w->user;
-    if (!st) return false;
+    if (!st || !e) return false;
     rect_t c;
     wm_client_screen_rect(w, &c);
 
     if (e->type == EV_MOUSE_DOWN) {
-        /* The parent-directory row sits on the path bar's left arrow. */
-        if (e->y < c.y + 30 && e->x < c.x + 70) {
-            /* Strip the last component. */
+        int mx = e->x, my = e->y;
+
+        /* Click on "Up" button (c->x + 8, c->y + 6, 32, 24) */
+        if (mx >= c.x + 8 && mx <= c.x + 40 && my >= c.y + 6 && my <= c.y + 30) {
             int n = (int)strlen(st->path);
             while (n > 1 && st->path[n - 1] != '/') n--;
             if (n > 1) n--;
-            st->path[n] = 0;
-            st->node = vfs_resolve_path(st->path[0] ? st->path : "/");
+            st->path[n] = '\0';
+            if (st->path[0] == '\0') strcpy(st->path, "/");
+            st->node = vfs_resolve_path(st->path);
             st->sel = 0;
+            st->status_msg[0] = '\0';
             wm_invalidate(w);
             return true;
         }
-        if (e->y >= c.y + 42 && e->y < c.y + c.h) {
-            int row = (e->y - (c.y + 42)) / 20;
-            int idx = 0;
+
+        /* Click on Refresh button (c->x + 44, c->y + 6, 28, 24) */
+        if (mx >= c.x + 44 && mx <= c.x + 72 && my >= c.y + 6 && my <= c.y + 30) {
+            st->node = vfs_resolve_path(st->path);
+            st->status_msg[0] = '\0';
+            wm_invalidate(w);
+            return true;
+        }
+
+        /* Click on "Install .deb" button */
+        int path_w = c.w - 200;
+        if (path_w < 120) path_w = 120;
+        rect_t btn_inst = { c.x + 80 + path_w, c.y + 6, c.w - (88 + path_w), 24 };
+        if (rect_contains_point(&btn_inst, mx, my) && st->selected_is_deb) {
+            char deb_path[160];
+            path_join(deb_path, sizeof(deb_path), st->path, st->selected_filename);
+            pkg_install_deb_file(deb_path);
+            snprintf(st->status_msg, sizeof(st->status_msg), "Package installed: %s", st->selected_filename);
+            wm_invalidate(w);
+            return true;
+        }
+
+        /* Click on Left Places / Bookmarks Sidebar (x < c.x + 140) */
+        if (mx >= c.x && mx < c.x + 140 && my >= c.y + 66 && my < c.y + 66 + FILE_PLACES_COUNT * 30) {
+            int place_idx = (my - (c.y + 66)) / 30;
+            if (place_idx >= 0 && place_idx < FILE_PLACES_COUNT) {
+                strncpy(st->path, file_places[place_idx].path, sizeof(st->path) - 1);
+                st->path[sizeof(st->path) - 1] = '\0';
+                st->node = vfs_resolve_path(st->path);
+                st->sel = 0;
+                st->status_msg[0] = '\0';
+                wm_invalidate(w);
+                return true;
+            }
+        }
+
+        /* Click on File Row in Main List View */
+        int main_x = c.x + 140;
+        int list_y0 = c.y + 36 + 26;
+        if (mx >= main_x && mx < c.x + c.w && my >= list_y0 && my < c.y + c.h - 24) {
+            int row = (my - list_y0) / 24;
             if (st->node && st->node->readdir) {
                 vfs_node_t *child = st->node->readdir(st->node, (uint32_t)row);
                 if (child) {
-                    if (child->flags & VFS_DIRECTORY) {
-                        char newpath[128];
-                        path_join(newpath, sizeof(newpath), st->path, child->name);
-                        vfs_node_t *n = vfs_resolve_path(newpath);
-                        if (n) {
-                            for (int i = 0; i < 127; i++) st->path[i] = newpath[i];
-                            st->path[127] = 0;
-                            st->node = n;
-                            st->sel = 0;
+                    uint32_t now = timer_get_ticks();
+                    bool is_double_click = (row == st->last_click_row && (now - st->last_click_time < 35));
+                    st->last_click_time = now;
+                    st->last_click_row = row;
+                    st->sel = row;
+
+                    if (is_double_click) {
+                        if (child->flags & VFS_DIRECTORY) {
+                            /* Open directory */
+                            char newpath[128];
+                            path_join(newpath, sizeof(newpath), st->path, child->name);
+                            vfs_node_t *n = vfs_resolve_path(newpath);
+                            if (n) {
+                                strncpy(st->path, newpath, sizeof(st->path) - 1);
+                                st->path[sizeof(st->path) - 1] = '\0';
+                                st->node = n;
+                                st->sel = 0;
+                                st->status_msg[0] = '\0';
+                            }
+                        } else if (strstr(child->name, ".deb") != NULL) {
+                            /* Double click on .deb installs the package! */
+                            char deb_path[160];
+                            path_join(deb_path, sizeof(deb_path), st->path, child->name);
+                            pkg_install_deb_file(deb_path);
+                            snprintf(st->status_msg, sizeof(st->status_msg), "Installed: %s", child->name);
                         }
                     }
+                    wm_invalidate(w);
+                    return true;
                 }
-                (void)idx;
             }
-            wm_invalidate(w);
-            return true;
         }
     }
+
     return false;
 }
 
 void app_open_files(void) {
-    wm_window_t *w = wm_create("Files", 180, 140, 520, 380);
+    wm_window_t *w = wm_create("Files — Storage & Package Manager", 160, 120, 560, 400);
     if (!w) return;
     files_state_t *st = kzalloc(sizeof(files_state_t));
     if (!st) { wm_destroy(w); return; }
-    st->path[0] = '/';
-    st->node = vfs_resolve_path("/");
+    strcpy(st->path, "/nova");
+    st->node = vfs_resolve_path("/nova");
+    if (!st->node) {
+        strcpy(st->path, "/");
+        st->node = vfs_resolve_path("/");
+    }
     w->user = st;
     w->paint = files_paint;
     w->event = files_event;
@@ -173,7 +392,7 @@ void app_open_files(void) {
 
 static void about_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     (void)w;
-    surface_fill_rect(s, c, TH_WIN_BG);
+    surface_fill_rect(s, c, TH_GLASS_PRIMARY);
 
     /* Header band with product name and glowing badge */
     rect_t band = { c->x, c->y, c->w, 92 };
@@ -234,7 +453,7 @@ static const char *help_rows[] = {
 
 static void help_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     (void)w;
-    surface_fill_rect(s, c, TH_WIN_BG_FOCUS);
+    surface_fill_rect(s, c, TH_GLASS_SECONDARY);
     rect_t p = { c->x + 20, c->y + 16, c->w - 40, c->h - 32 };
     panel(s, &p, "Keyboard and mouse");
     int y = p.y + 38;
@@ -243,7 +462,7 @@ static void help_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
         if (row[0] == '\0') { y += 8; continue; }
         bool is_heading = (row[0] != ' ');
         text_draw(s, is_heading ? font_bold() : font_ui(), p.x + 16, y, row,
-                  is_heading ? TH_ACCENT : TH_TEXT);
+                  is_heading ? TH_ACCENT_PRIMARY : TH_TEXT_PRIMARY);
         y += 20;
     }
 }
@@ -258,7 +477,7 @@ void app_open_help(void) {
 
 static void sysinfo_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     (void)w;
-    surface_fill_rect(s, c, TH_WIN_BG_FOCUS);
+    surface_fill_rect(s, c, TH_GLASS_SECONDARY);
     int pad = 20;
     rect_t p = { c->x + pad, c->y + pad, c->w - pad * 2, c->h - pad * 2 };
     panel(s, &p, "System monitor");
@@ -284,9 +503,9 @@ static void sysinfo_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     y = kv_line(s, y, "Uptime", buf, p.x + 16, p.w - 32);
 
     y += 12;
-    text_draw(s, font_bold(), p.x + 16, y, "Process table", TH_ACCENT);
+    text_draw(s, font_bold(), p.x + 16, y, "Process table", TH_ACCENT_PRIMARY);
     y += 24;
-    text_draw(s, font_mono(), p.x + 16, y, "  PID  STATE       NAME", TH_TEXT_DIM);
+    text_draw(s, font_mono(), p.x + 16, y, "  PID  STATE       NAME", TH_TEXT_SECONDARY);
     y += 20;
     for (int i = 0; i < 12 && y < p.y + p.h - 30; i++) {
         process_t *p2 = process_get_by_pid(i + 1);
@@ -307,7 +526,7 @@ static void sysinfo_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
         while (n < 36) line[n++] = ' ';
         for (int i2 = 0; p2->name[i2] && n < 90; i2++) line[n++] = p2->name[i2];
         line[n] = 0;
-        color_t col = p2->is_user ? TH_TEXT : TH_TERM_WARN;
+        color_t col = p2->is_user ? TH_TEXT_PRIMARY : TH_TERM_WARN;
         text_draw(s, font_mono(), p.x + 16, y, line, col);
         y += 19;
     }
@@ -455,13 +674,13 @@ static void calc_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     /* Operation indicator */
     if (st->pending_op) {
         char op_str[4] = { st->pending_op, 0 };
-        text_draw(s, font_bold(), disp_box.x + 10, disp_box.y + 16, op_str, TH_ACCENT);
+        text_draw(s, font_bold(), disp_box.x + 10, disp_box.y + 16, op_str, TH_ACCENT_PRIMARY);
     }
 
     int tw = text_width(font_bold(), st->display);
     int tx = disp_box.x + disp_box.w - 14 - tw;
     if (tx < disp_box.x + 28) tx = disp_box.x + 28;
-    text_draw(s, font_bold(), tx, disp_box.y + 14, st->display, TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), tx, disp_box.y + 14, st->display, TH_TEXT_PRIMARY);
 
     /* 4x5 Button Grid */
     int start_y = c->y + 70;
@@ -491,7 +710,7 @@ static void calc_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
         const char *lbl = calc_btn_labels[idx];
         int lw = text_width(font_bold(), lbl);
-        color_t tc = is_op ? TH_TEXT_BRIGHT : TH_TEXT;
+        color_t tc = is_op ? TH_TEXT_PRIMARY : TH_TEXT_PRIMARY;
         text_draw(s, font_bold(), br.x + (br.w - lw) / 2, br.y + (br.h - 14) / 2, lbl, tc);
     }
 }
@@ -628,14 +847,14 @@ static void editor_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     surface_rounded_fill(s, &btn_save, 4, st->hover_action == 2 ? RGB(0x38, 0x8B, 0xFD) : RGB(0x1F, 0x6F, 0xEB));
     surface_rounded_fill(s, &btn_clr, 4, st->hover_action == 3 ? RGB(0x35, 0x40, 0x54) : RGB(0x25, 0x2E, 0x3E));
 
-    text_draw(s, font_ui(), btn_new.x + 14, btn_new.y + 5, "New", TH_TEXT);
-    text_draw(s, font_bold(), btn_save.x + 11, btn_save.y + 5, "Save", TH_TEXT_BRIGHT);
-    text_draw(s, font_ui(), btn_clr.x + 11, btn_clr.y + 5, "Clear", TH_TEXT);
+    text_draw(s, font_ui(), btn_new.x + 14, btn_new.y + 5, "New", TH_TEXT_PRIMARY);
+    text_draw(s, font_bold(), btn_save.x + 11, btn_save.y + 5, "Save", TH_TEXT_PRIMARY);
+    text_draw(s, font_ui(), btn_clr.x + 11, btn_clr.y + 5, "Clear", TH_TEXT_PRIMARY);
 
     /* Document title and dirty flag */
     char title_buf[64];
     snprintf(title_buf, sizeof(title_buf), "%s%s", st->path, st->dirty ? " *" : "");
-    text_draw(s, font_bold(), c->x + 215, c->y + 11, title_buf, st->dirty ? TH_ACCENT : TH_TEXT_DIM);
+    text_draw(s, font_bold(), c->x + 215, c->y + 11, title_buf, st->dirty ? TH_ACCENT_PRIMARY : TH_TEXT_SECONDARY);
 
     /* Text Canvas Area */
     int line_num_w = 36;
@@ -678,7 +897,7 @@ static void editor_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
         } else {
             if (cur_y < c->y + c->h - 30) {
                 char s_one[2] = { ch, 0 };
-                text_draw(s, font_mono(), cur_x, cur_y, s_one, TH_TEXT);
+                text_draw(s, font_mono(), cur_x, cur_y, s_one, TH_TEXT_PRIMARY);
             }
             cur_x += 8; /* monospace character width */
         }
@@ -687,7 +906,7 @@ static void editor_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     /* Draw blinking Caret Cursor */
     if ((timer_get_ticks() / 300) % 2 == 0) {
         rect_t caret_r = { caret_px, caret_py + 1, 2, 14 };
-        surface_fill_rect(s, &caret_r, TH_ACCENT);
+        surface_fill_rect(s, &caret_r, TH_ACCENT_PRIMARY);
     }
 
     /* Bottom Status Bar */
@@ -697,8 +916,8 @@ static void editor_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
     char meta_buf[64];
     snprintf(meta_buf, sizeof(meta_buf), "Ln %d, Chars %d", line_no, st->len);
-    text_draw(s, font_mono(), c->x + 12, c->y + c->h - 17, meta_buf, TH_TEXT_DIM);
-    text_draw(s, font_ui(), c->x + c->w - 240, c->y + c->h - 17, st->status, TH_ACCENT);
+    text_draw(s, font_mono(), c->x + 12, c->y + c->h - 17, meta_buf, TH_TEXT_SECONDARY);
+    text_draw(s, font_ui(), c->x + c->w - 240, c->y + c->h - 17, st->status, TH_ACCENT_PRIMARY);
 }
 
 static bool editor_event(wm_window_t *w, const gui_event_t *e) {
@@ -882,7 +1101,7 @@ static void player_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
     const char *hw_str = ac97_is_available() ? "Audio Device: Intel AC'97 HD Codec (48kHz DAC)"
                                              : "Audio Device: PC Speaker (PIT Timer 2 / Port 0x61)";
-    text_draw(s, font_bold(), hdr.x + 14, hdr.y + 11, hw_str, TH_ACCENT);
+    text_draw(s, font_bold(), hdr.x + 14, hdr.y + 11, hw_str, TH_ACCENT_PRIMARY);
 
     /* Melodies Preset Bar */
     rect_t btn_chime = { c->x + 14, c->y + 60, 94, 26 };
@@ -895,10 +1114,10 @@ static void player_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     surface_rounded_fill(s, &btn_fan,   4, st->hover_action == 3 ? RGB(0x38, 0x8B, 0xFD) : RGB(0x1F, 0x6F, 0xEB));
     surface_rounded_fill(s, &btn_stop,  4, st->hover_action == 4 ? RGB(0x40, 0x4C, 0x60) : RGB(0x2A, 0x33, 0x43));
 
-    text_draw(s, font_bold(), btn_chime.x + 14, btn_chime.y + 6, "> Chime", TH_TEXT_BRIGHT);
-    text_draw(s, font_bold(), btn_scale.x + 18, btn_scale.y + 6, "> Scale", TH_TEXT_BRIGHT);
-    text_draw(s, font_bold(), btn_fan.x + 14,   btn_fan.y + 6,   "> Fanfare", TH_TEXT_BRIGHT);
-    text_draw(s, font_bold(), btn_stop.x + 18,  btn_stop.y + 6,  "|| Stop", TH_TEXT);
+    text_draw(s, font_bold(), btn_chime.x + 14, btn_chime.y + 6, "> Chime", TH_TEXT_PRIMARY);
+    text_draw(s, font_bold(), btn_scale.x + 18, btn_scale.y + 6, "> Scale", TH_TEXT_PRIMARY);
+    text_draw(s, font_bold(), btn_fan.x + 14,   btn_fan.y + 6,   "> Fanfare", TH_TEXT_PRIMARY);
+    text_draw(s, font_bold(), btn_stop.x + 18,  btn_stop.y + 6,  "|| Stop", TH_TEXT_PRIMARY);
 
     /* Animated Spectrum Visualizer (16 gradient bars) */
     rect_t viz_box = { c->x + 12, c->y + 96, c->w - 24, 76 };
@@ -1090,10 +1309,10 @@ static void settings_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
         bool active = (st->tab == t);
         if (active) {
             surface_rounded_fill(s, &tr, 5, RGB(0x1F, 0x6F, 0xEB));
-            text_draw(s, font_bold(), tr.x + 12, tr.y + 7, tab_names[t], TH_TEXT_BRIGHT);
+            text_draw(s, font_bold(), tr.x + 12, tr.y + 7, tab_names[t], TH_TEXT_PRIMARY);
         } else {
             surface_rounded_fill(s, &tr, 5, RGB(0x23, 0x2B, 0x3B));
-            text_draw(s, font_ui(), tr.x + 12, tr.y + 7, tab_names[t], TH_TEXT_DIM);
+            text_draw(s, font_ui(), tr.x + 12, tr.y + 7, tab_names[t], TH_TEXT_SECONDARY);
         }
     }
 
@@ -1106,12 +1325,12 @@ static void settings_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
     if (st->tab == 0) {
         /* Display & DPI settings */
-        text_draw(s, font_bold(), card.x + 20, y, "HiDPI Display Scaling", TH_ACCENT);
+        text_draw(s, font_bold(), card.x + 20, y, "HiDPI Display Scaling", TH_ACCENT_PRIMARY);
         y += 24;
         char dpi_msg[64];
         snprintf(dpi_msg, sizeof(dpi_msg), "Current Scale: %d DPI (%d%% native scaling)",
                  theme_get_dpi(), (theme_get_dpi() * 100) / 96);
-        text_draw(s, font_ui(), card.x + 20, y, dpi_msg, TH_TEXT);
+        text_draw(s, font_ui(), card.x + 20, y, dpi_msg, TH_TEXT_PRIMARY);
         y += 32;
 
         rect_t b96  = { card.x + 20, y, 120, 32 };
@@ -1123,72 +1342,89 @@ static void settings_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
         surface_rounded_fill(s, &b120, 6, cur_dpi == 120 ? RGB(0x1F, 0x6F, 0xEB) : RGB(0x2C, 0x36, 0x48));
         surface_rounded_fill(s, &b144, 6, cur_dpi == 144 ? RGB(0x1F, 0x6F, 0xEB) : RGB(0x2C, 0x36, 0x48));
 
-        text_draw(s, font_bold(), b96.x + 16, b96.y + 8, "96 DPI (1.0x)", TH_TEXT_BRIGHT);
-        text_draw(s, font_bold(), b120.x + 14, b120.y + 8, "120 DPI (1.25x)", TH_TEXT_BRIGHT);
-        text_draw(s, font_bold(), b144.x + 14, b144.y + 8, "144 DPI (1.5x)", TH_TEXT_BRIGHT);
+        text_draw(s, font_bold(), b96.x + 16, b96.y + 8, "96 DPI (1.0x)", TH_TEXT_PRIMARY);
+        text_draw(s, font_bold(), b120.x + 14, b120.y + 8, "120 DPI (1.25x)", TH_TEXT_PRIMARY);
+        text_draw(s, font_bold(), b144.x + 14, b144.y + 8, "144 DPI (1.5x)", TH_TEXT_PRIMARY);
 
-        y += 54;
-        text_draw(s, font_bold(), card.x + 20, y, "Rendering Quality & Smoothness", TH_ACCENT);
+        y += 48;
+        text_draw(s, font_bold(), card.x + 20, y, "Glassmorphism & Visual Effects", TH_ACCENT_PRIMARY);
         y += 24;
-        text_draw(s, font_ui(), card.x + 20, y, "- 60 FPS Compositor frame pacing enabled", TH_TEXT_DIM);
+
+        rect_t b_blur = { card.x + 20, y, 170, 30 };
+        rect_t b_motion = { card.x + 205, y, 185, 30 };
+        bool blur_on = glass_get_blur_enabled();
+        bool motion_red = glass_get_reduced_motion();
+
+        surface_rounded_fill(s, &b_blur, 6, blur_on ? RGB(0x1F, 0x6F, 0xEB) : RGB(0x2C, 0x36, 0x48));
+        surface_rounded_outline(s, &b_blur, 6, blur_on ? RGB(0x65, 0xD9, 0xFF) : RGB(0x45, 0x54, 0x6E), 1);
+        text_draw(s, font_bold(), b_blur.x + 16, b_blur.y + 7, blur_on ? "Glass Blur: ON" : "Glass Blur: OFF", TH_TEXT_PRIMARY);
+
+        surface_rounded_fill(s, &b_motion, 6, motion_red ? RGB(0x1F, 0x6F, 0xEB) : RGB(0x2C, 0x36, 0x48));
+        surface_rounded_outline(s, &b_motion, 6, motion_red ? RGB(0x65, 0xD9, 0xFF) : RGB(0x45, 0x54, 0x6E), 1);
+        text_draw(s, font_bold(), b_motion.x + 16, b_motion.y + 7, motion_red ? "Reduced Motion: ON" : "Reduced Motion: OFF", TH_TEXT_PRIMARY);
+
+        y += 44;
+        text_draw(s, font_bold(), card.x + 20, y, "Rendering Quality & Smoothness", TH_ACCENT_PRIMARY);
         y += 20;
-        text_draw(s, font_ui(), card.x + 20, y, "- 4x Subpixel Anti-Aliased rounded rect rasterizer", TH_TEXT_DIM);
-        y += 20;
-        text_draw(s, font_ui(), card.x + 20, y, "- Hardware Double-buffering with LFB zero-tear copy", TH_TEXT_DIM);
+        text_draw(s, font_ui(), card.x + 20, y, "- 60 FPS Compositor frame pacing enabled", TH_TEXT_SECONDARY);
+        y += 18;
+        text_draw(s, font_ui(), card.x + 20, y, "- 4x Subpixel Anti-Aliased rounded rect rasterizer", TH_TEXT_SECONDARY);
+        y += 18;
+        text_draw(s, font_ui(), card.x + 20, y, "- Hardware Double-buffering with LFB zero-tear copy", TH_TEXT_SECONDARY);
     } else if (st->tab == 1) {
         /* Audio settings */
-        text_draw(s, font_bold(), card.x + 20, y, "Audio Synthesizer & Codec", TH_ACCENT);
+        text_draw(s, font_bold(), card.x + 20, y, "Audio Synthesizer & Codec", TH_ACCENT_PRIMARY);
         y += 24;
         text_draw(s, font_ui(), card.x + 20, y,
                   ac97_is_available() ? "Hardware: Intel 82801 AC'97 Audio Controller active"
                                       : "Hardware: PC Speaker (PIT Timer 2 / 8254) fallback active",
-                  TH_TEXT);
+                  TH_TEXT_PRIMARY);
         y += 36;
 
         rect_t btn_test = { card.x + 20, y, 160, 32 };
         surface_rounded_fill(s, &btn_test, 6, RGB(0x1F, 0x6F, 0xEB));
-        text_draw(s, font_bold(), btn_test.x + 18, btn_test.y + 8, "Play Audio Chime", TH_TEXT_BRIGHT);
+        text_draw(s, font_bold(), btn_test.x + 18, btn_test.y + 8, "Play Audio Chime", TH_TEXT_PRIMARY);
 
         y += 56;
-        text_draw(s, font_bold(), card.x + 20, y, "Sample Rate: 48,000 Hz | 16-Bit PCM DAC", TH_TEXT_DIM);
+        text_draw(s, font_bold(), card.x + 20, y, "Sample Rate: 48,000 Hz | 16-Bit PCM DAC", TH_TEXT_SECONDARY);
     } else if (st->tab == 2) {
         /* Mouse & Input settings */
-        text_draw(s, font_bold(), card.x + 20, y, "Pointer & Mouse Control", TH_ACCENT);
+        text_draw(s, font_bold(), card.x + 20, y, "Pointer & Mouse Control", TH_ACCENT_PRIMARY);
         y += 24;
         char sens_str[64];
         snprintf(sens_str, sizeof(sens_str), "Sensitivity Level: %u / 10", (unsigned)mouse_get_sensitivity());
-        text_draw(s, font_ui(), card.x + 20, y, sens_str, TH_TEXT);
+        text_draw(s, font_ui(), card.x + 20, y, sens_str, TH_TEXT_PRIMARY);
         y += 32;
 
         rect_t btn_slower = { card.x + 20, y, 110, 32 };
         rect_t btn_faster = { card.x + 140, y, 110, 32 };
         surface_rounded_fill(s, &btn_slower, 6, RGB(0x2C, 0x36, 0x48));
         surface_rounded_fill(s, &btn_faster, 6, RGB(0x1F, 0x6F, 0xEB));
-        text_draw(s, font_bold(), btn_slower.x + 16, btn_slower.y + 8, "- Slower", TH_TEXT_BRIGHT);
-        text_draw(s, font_bold(), btn_faster.x + 16, btn_faster.y + 8, "+ Faster", TH_TEXT_BRIGHT);
+        text_draw(s, font_bold(), btn_slower.x + 16, btn_slower.y + 8, "- Slower", TH_TEXT_PRIMARY);
+        text_draw(s, font_bold(), btn_faster.x + 16, btn_faster.y + 8, "+ Faster", TH_TEXT_PRIMARY);
 
         y += 54;
-        text_draw(s, font_bold(), card.x + 20, y, "Hardware Reporting Rate: 200 Hz (Smooth Streaming)", TH_TEXT_DIM);
+        text_draw(s, font_bold(), card.x + 20, y, "Hardware Reporting Rate: 200 Hz (Smooth Streaming)", TH_TEXT_SECONDARY);
     } else {
         /* Storage & HW */
-        text_draw(s, font_bold(), card.x + 20, y, "Storage & Hardware Registry", TH_ACCENT);
+        text_draw(s, font_bold(), card.x + 20, y, "Storage & Hardware Registry", TH_ACCENT_PRIMARY);
         y += 26;
         uint64_t total = pmm_get_total_pages() * 4096ULL / (1024 * 1024);
         uint64_t used  = (pmm_get_total_pages() - pmm_get_free_pages()) * 4096ULL / (1024 * 1024);
         char ram_str[64];
         snprintf(ram_str, sizeof(ram_str), "RAM Usage: %llu MiB used / %llu MiB total",
                  (unsigned long long)used, (unsigned long long)total);
-        text_draw(s, font_ui(), card.x + 20, y, ram_str, TH_TEXT);
+        text_draw(s, font_ui(), card.x + 20, y, ram_str, TH_TEXT_PRIMARY);
         y += 24;
 
         text_draw(s, font_ui(), card.x + 20, y,
                   virtio_blk_get_capacity() ? "Disk: VirtIO-Blk PCI disk active" : "Disk: ATA-IDE PIO hard disk active",
-                  TH_TEXT);
+                  TH_TEXT_PRIMARY);
         y += 24;
 
         char drv_str[64];
         snprintf(drv_str, sizeof(drv_str), "Loaded Kernel Drivers: %d drivers registered", driver_count());
-        text_draw(s, font_ui(), card.x + 20, y, drv_str, TH_TEXT);
+        text_draw(s, font_ui(), card.x + 20, y, drv_str, TH_TEXT_PRIMARY);
     }
 
     if (st->msg[0]) {
@@ -1244,6 +1480,25 @@ static bool settings_event(wm_window_t *w, const gui_event_t *e) {
             if (rect_contains_point(&b144, e->x, e->y)) {
                 theme_set_dpi(144);
                 ui_strcpy(st->msg, sizeof(st->msg), "Set to 144 DPI (150% HiDPI)");
+                sound_play_click();
+                desktop_invalidate();
+                wm_invalidate(w);
+                return true;
+            }
+
+            rect_t b_blur = { card.x + 20, y + 128, 170, 30 };
+            rect_t b_motion = { card.x + 205, y + 128, 185, 30 };
+            if (rect_contains_point(&b_blur, e->x, e->y)) {
+                glass_set_blur_enabled(!glass_get_blur_enabled());
+                ui_strcpy(st->msg, sizeof(st->msg), glass_get_blur_enabled() ? "Frosted Glass Blur Enabled" : "Frosted Glass Blur Disabled");
+                sound_play_click();
+                desktop_invalidate();
+                wm_invalidate_all();
+                return true;
+            }
+            if (rect_contains_point(&b_motion, e->x, e->y)) {
+                glass_set_reduced_motion(!glass_get_reduced_motion());
+                ui_strcpy(st->msg, sizeof(st->msg), glass_get_reduced_motion() ? "Reduced Motion Enabled" : "Reduced Motion Disabled");
                 sound_play_click();
                 desktop_invalidate();
                 wm_invalidate(w);
@@ -1343,13 +1598,13 @@ static void cal_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     rect_t btn_next = { hdr.x + hdr.w - 36, hdr.y + 5, 28, 24 };
     surface_rounded_fill(s, &btn_prev, 4, RGB(0x28, 0x36, 0x4D));
     surface_rounded_fill(s, &btn_next, 4, RGB(0x28, 0x36, 0x4D));
-    text_draw(s, font_bold(), btn_prev.x + 9, btn_prev.y + 4, "<", TH_TEXT_BRIGHT);
-    text_draw(s, font_bold(), btn_next.x + 10, btn_next.y + 4, ">", TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), btn_prev.x + 9, btn_prev.y + 4, "<", TH_TEXT_PRIMARY);
+    text_draw(s, font_bold(), btn_next.x + 10, btn_next.y + 4, ">", TH_TEXT_PRIMARY);
 
     char title_buf[64];
     snprintf(title_buf, sizeof(title_buf), "%s %d", month_names[st->month - 1], st->year);
     int tw = text_width(font_bold(), title_buf);
-    text_draw(s, font_bold(), hdr.x + (hdr.w - tw) / 2, hdr.y + 8, title_buf, TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), hdr.x + (hdr.w - tw) / 2, hdr.y + 8, title_buf, TH_TEXT_PRIMARY);
 
     /* Weekday columns */
     static const char *wk_names[] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
@@ -1380,13 +1635,13 @@ static void cal_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
         if (is_today) {
             rect_t pill = { dx + (col_w - 24) / 2, dy - 2, 24, 22 };
-            surface_rounded_fill(s, &pill, 11, TH_ACCENT);
+            surface_rounded_fill(s, &pill, 11, TH_ACCENT_PRIMARY);
         }
 
         char num_str[8];
         snprintf(num_str, sizeof(num_str), "%d", d);
         int nw = text_width(is_today ? font_bold() : font_ui(), num_str);
-        color_t tc = is_today ? RGB(255, 255, 255) : TH_TEXT;
+        color_t tc = is_today ? RGB(255, 255, 255) : TH_TEXT_PRIMARY;
         text_draw(s, is_today ? font_bold() : font_ui(), dx + (col_w - nw) / 2, dy + 2, num_str, tc);
     }
 
@@ -1480,47 +1735,47 @@ static void net_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     rect_t card_eth = { c->x + 12, c->y + 12, card_w, 76 };
     surface_rounded_fill(s, &card_eth, 8, RGB(0x1B, 0x22, 0x30));
     surface_rounded_outline(s, &card_eth, 8, RGB(0x2D, 0x3A, 0x52), 1);
-    text_draw(s, font_bold(), card_eth.x + 12, card_eth.y + 10, "Ethernet (eth0)", TH_TEXT_BRIGHT);
-    text_draw(s, font_ui(), card_eth.x + 12, card_eth.y + 30, net.eth_connected ? "Status: Connected (1000 Mbps Full Duplex)" : "Status: Cable Disconnected", net.eth_connected ? RGB(50, 205, 120) : TH_TEXT_DIM);
+    text_draw(s, font_bold(), card_eth.x + 12, card_eth.y + 10, "Ethernet (eth0)", TH_TEXT_PRIMARY);
+    text_draw(s, font_ui(), card_eth.x + 12, card_eth.y + 30, net.eth_connected ? "Status: Connected (1000 Mbps Full Duplex)" : "Status: Cable Disconnected", net.eth_connected ? RGB(50, 205, 120) : TH_TEXT_SECONDARY);
     char eth_ip_str[64];
     snprintf(eth_ip_str, sizeof(eth_ip_str), "IPv4: %s  |  Gateway: 10.0.2.2", net.eth_ip);
-    text_draw(s, font_mono(), card_eth.x + 12, card_eth.y + 50, eth_ip_str, TH_TEXT_DIM);
+    text_draw(s, font_mono(), card_eth.x + 12, card_eth.y + 50, eth_ip_str, TH_TEXT_SECONDARY);
 
     rect_t btn_eth = { card_eth.x + card_eth.w - 96, card_eth.y + 10, 84, 24 };
     surface_rounded_fill(s, &btn_eth, 5, net.eth_connected ? RGB(0x3B, 0x50, 0x72) : RGB(0x2A, 0x7B, 0x45));
-    text_draw(s, font_ui(), btn_eth.x + 10, btn_eth.y + 4, net.eth_connected ? "Disconnect" : "Connect", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), btn_eth.x + 10, btn_eth.y + 4, net.eth_connected ? "Disconnect" : "Connect", TH_TEXT_PRIMARY);
 
     /* Card 2: Wi-Fi */
     rect_t card_wifi = { c->x + 12, c->y + 96, card_w, 82 };
     surface_rounded_fill(s, &card_wifi, 8, RGB(0x1B, 0x22, 0x30));
     surface_rounded_outline(s, &card_wifi, 8, RGB(0x2D, 0x3A, 0x52), 1);
-    text_draw(s, font_bold(), card_wifi.x + 12, card_wifi.y + 10, "Wi-Fi (wlan0) - Intel 802.11ac", TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), card_wifi.x + 12, card_wifi.y + 10, "Wi-Fi (wlan0) - Intel 802.11ac", TH_TEXT_PRIMARY);
     char wifi_st[96];
     if (net.wifi_enabled) {
         snprintf(wifi_st, sizeof(wifi_st), "Connected to: %s (%d%% Signal, %d dBm)", net.wifi_ssid, net.wifi_signal_pct, net.wifi_dbm);
     } else {
         snprintf(wifi_st, sizeof(wifi_st), "Wi-Fi Hardware Disabled");
     }
-    text_draw(s, font_ui(), card_wifi.x + 12, card_wifi.y + 30, wifi_st, net.wifi_enabled ? RGB(50, 205, 120) : TH_TEXT_DIM);
-    text_draw(s, font_mono(), card_wifi.x + 12, card_wifi.y + 50, "Security: WPA3-Personal  |  Band: 5.0 GHz (Ch 36)", TH_TEXT_DIM);
+    text_draw(s, font_ui(), card_wifi.x + 12, card_wifi.y + 30, wifi_st, net.wifi_enabled ? RGB(50, 205, 120) : TH_TEXT_SECONDARY);
+    text_draw(s, font_mono(), card_wifi.x + 12, card_wifi.y + 50, "Security: WPA3-Personal  |  Band: 5.0 GHz (Ch 36)", TH_TEXT_SECONDARY);
 
     rect_t btn_wifi = { card_wifi.x + card_wifi.w - 84, card_wifi.y + 10, 72, 24 };
     surface_rounded_fill(s, &btn_wifi, 5, net.wifi_enabled ? RGB(0x84, 0x32, 0x32) : RGB(0x2A, 0x7B, 0x45));
-    text_draw(s, font_ui(), btn_wifi.x + 12, btn_wifi.y + 4, net.wifi_enabled ? "Turn Off" : "Turn On", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), btn_wifi.x + 12, btn_wifi.y + 4, net.wifi_enabled ? "Turn Off" : "Turn On", TH_TEXT_PRIMARY);
 
     /* Card 3: Bluetooth */
     rect_t card_bt = { c->x + 12, c->y + 186, card_w, 76 };
     surface_rounded_fill(s, &card_bt, 8, RGB(0x1B, 0x22, 0x30));
     surface_rounded_outline(s, &card_bt, 8, RGB(0x2D, 0x3A, 0x52), 1);
-    text_draw(s, font_bold(), card_bt.x + 12, card_bt.y + 10, "Bluetooth (bt0) - Intel BT 5.3 LE", TH_TEXT_BRIGHT);
-    text_draw(s, font_ui(), card_bt.x + 12, card_bt.y + 30, net.bt_enabled ? "Status: Enabled (Discoverable)" : "Status: Disabled", net.bt_enabled ? RGB(65, 160, 245) : TH_TEXT_DIM);
+    text_draw(s, font_bold(), card_bt.x + 12, card_bt.y + 10, "Bluetooth (bt0) - Intel BT 5.3 LE", TH_TEXT_PRIMARY);
+    text_draw(s, font_ui(), card_bt.x + 12, card_bt.y + 30, net.bt_enabled ? "Status: Enabled (Discoverable)" : "Status: Disabled", net.bt_enabled ? RGB(65, 160, 245) : TH_TEXT_SECONDARY);
     char bt_dev_str[64];
     snprintf(bt_dev_str, sizeof(bt_dev_str), "Paired: %s (%d devices)", net.bt_device, net.bt_paired_count);
-    text_draw(s, font_mono(), card_bt.x + 12, card_bt.y + 50, bt_dev_str, TH_TEXT_DIM);
+    text_draw(s, font_mono(), card_bt.x + 12, card_bt.y + 50, bt_dev_str, TH_TEXT_SECONDARY);
 
     rect_t btn_bt = { card_bt.x + card_bt.w - 84, card_bt.y + 10, 72, 24 };
     surface_rounded_fill(s, &btn_bt, 5, net.bt_enabled ? RGB(0x84, 0x32, 0x32) : RGB(0x2A, 0x7B, 0x45));
-    text_draw(s, font_ui(), btn_bt.x + 12, btn_bt.y + 4, net.bt_enabled ? "Turn Off" : "Turn On", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), btn_bt.x + 12, btn_bt.y + 4, net.bt_enabled ? "Turn Off" : "Turn On", TH_TEXT_PRIMARY);
 }
 
 static bool net_event(wm_window_t *w, const gui_event_t *e) {
@@ -1588,7 +1843,7 @@ static void power_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
     surface_rounded_fill(s, &card_bat, 8, RGB(0x1B, 0x22, 0x30));
     surface_rounded_outline(s, &card_bat, 8, RGB(0x2D, 0x3A, 0x52), 1);
 
-    text_draw(s, font_bold(), card_bat.x + 14, card_bat.y + 10, "ACPI Battery & Power Source", TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), card_bat.x + 14, card_bat.y + 10, "ACPI Battery & Power Source", TH_TEXT_PRIMARY);
 
     /* Visual Battery Gauge */
     rect_t b_frame = { card_bat.x + 14, card_bat.y + 36, 56, 24 };
@@ -1605,28 +1860,28 @@ static void power_paint(wm_window_t *w, surface_t *s, const rect_t *c) {
 
     char pct_buf[32];
     snprintf(pct_buf, sizeof(pct_buf), "%u%% %s", p.battery_percent, p.is_charging ? "(Charging Mode)" : "(Discharging)");
-    text_draw(s, font_bold(), card_bat.x + 84, card_bat.y + 34, pct_buf, p.is_charging ? RGB(50, 220, 130) : TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), card_bat.x + 84, card_bat.y + 34, pct_buf, p.is_charging ? RGB(50, 220, 130) : TH_TEXT_PRIMARY);
 
     char detail_buf[96];
     snprintf(detail_buf, sizeof(detail_buf), "Voltage: %u mV  |  Health: 99%% (4,850 mAh / 4,900 mAh)", p.voltage_mv);
-    text_draw(s, font_mono(), card_bat.x + 84, card_bat.y + 54, detail_buf, TH_TEXT_DIM);
+    text_draw(s, font_mono(), card_bat.x + 84, card_bat.y + 54, detail_buf, TH_TEXT_SECONDARY);
 
-    text_draw(s, font_ui(), card_bat.x + 14, card_bat.y + 82, p.status_str, TH_ACCENT);
+    text_draw(s, font_ui(), card_bat.x + 14, card_bat.y + 82, p.status_str, TH_ACCENT_PRIMARY);
 
     /* Card 2: Controls */
     rect_t card_ctrl = { c->x + 12, c->y + 130, card_w, 86 };
     surface_rounded_fill(s, &card_ctrl, 8, RGB(0x1B, 0x22, 0x30));
     surface_rounded_outline(s, &card_ctrl, 8, RGB(0x2D, 0x3A, 0x52), 1);
 
-    text_draw(s, font_bold(), card_ctrl.x + 14, card_ctrl.y + 10, "Power State Actions", TH_TEXT_BRIGHT);
+    text_draw(s, font_bold(), card_ctrl.x + 14, card_ctrl.y + 10, "Power State Actions", TH_TEXT_PRIMARY);
 
     rect_t btn_ac = { card_ctrl.x + 14, card_ctrl.y + 36, 150, 32 };
     surface_rounded_fill(s, &btn_ac, 6, p.is_charging ? RGB(0x28, 0x58, 0x3C) : RGB(0x3B, 0x50, 0x72));
-    text_draw(s, font_ui(), btn_ac.x + 12, btn_ac.y + 8, p.is_charging ? "Unplug AC Charger" : "Plug In AC Charger", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), btn_ac.x + 12, btn_ac.y + 8, p.is_charging ? "Unplug AC Charger" : "Plug In AC Charger", TH_TEXT_PRIMARY);
 
     rect_t btn_sleep = { card_ctrl.x + 176, card_ctrl.y + 36, 160, 32 };
     surface_rounded_fill(s, &btn_sleep, 6, RGB(0x56, 0x38, 0x82));
-    text_draw(s, font_ui(), btn_sleep.x + 14, btn_sleep.y + 8, "Enter Standby Mode", TH_TEXT_BRIGHT);
+    text_draw(s, font_ui(), btn_sleep.x + 14, btn_sleep.y + 8, "Enter Standby Mode", TH_TEXT_PRIMARY);
 }
 
 static bool power_event(wm_window_t *w, const gui_event_t *e) {

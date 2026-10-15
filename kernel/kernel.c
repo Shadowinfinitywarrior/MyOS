@@ -23,12 +23,26 @@ extern void syscall_init(void);
 extern void syscall_init_64(void);
 extern void serial_printf(const char *fmt, ...);
 
+extern void crash_dump_save(const char *msg, registers_t *regs);
+extern void crash_dump_check(void);
+extern void stack_protector_init(void);
+extern void aslr_init(void);
+extern void cpu_enable_security(void);
+extern void slab_init(void);
+extern void smp_init(void);
+
 void kernel_panic(const char *msg, const char *file, int line){
     (void)file;
     (void)line;
+    static volatile int in_panic = 0;
+    if (in_panic) {
+        for (;;) __asm__ volatile("cli; hlt");
+    }
+    in_panic = 1;
+    crash_dump_save(msg, NULL);
     screen_set_color(15,4);
     screen_write("KERNEL PANIC\n");
-    screen_write(msg);
+    if (msg) screen_write(msg);
     hang();
 }
 
@@ -61,6 +75,10 @@ void kernel_main_64(void){
 
     gdt_init();
     tss_init();
+    stack_protector_init();
+    aslr_init();
+    cpu_enable_security();
+    crash_dump_check();
     {
         uint64_t mmap_ptr = 0;
         uint64_t mmap_cnt = 0;
@@ -82,6 +100,7 @@ void kernel_main_64(void){
     kprintf("[KERNEL] __kernel_end=0x%lx\n", (unsigned long)(uintptr_t)__kernel_end);
     kprintf("[KERNEL] HEAP_BASE=0x4000000 (fixed)\n");
     paging_init();
+    slab_init();
     kprintf("paging enabled\n");
     kprintf("higher-half kernel\n");
     serial_printf("paging enabled\n");
@@ -93,6 +112,7 @@ void kernel_main_64(void){
     syscall_init();
     syscall_init_64();
     timer_init(1000);
+    smp_init();
 
     /* Page fault handler (vector 14) with COW and demand paging support */
     pagefault_init();

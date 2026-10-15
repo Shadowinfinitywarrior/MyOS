@@ -1,12 +1,14 @@
 #include "driver.h"
 #include "../lib/string.h"
+#include "../lib/printf.h"
+#include "../kernel/heap.h"
 
-/* Fixed table: no allocation, so a driver can register even very early in
- * boot before the heap is fully warmed up. */
 static myos_driver_info_t g_drivers[DRIVER_MAX];
 static int g_driver_count = 0;
 
-/* Copy a string into a fixed field, always leaving a terminator. */
+static bus_t *bus_head = NULL;
+static spinlock_t driver_model_lock = SPINLOCK_INIT;
+
 static void copy_field(char *dst, size_t cap, const char *src) {
     size_t i = 0;
     if (src) {
@@ -34,11 +36,68 @@ const myos_driver_info_t *driver_get(int index) {
     return &g_drivers[index];
 }
 
-/*
- * Drivers that are always part of this kernel and have no separate probe:
- * they are wired into the boot path directly. Registering them here means the
- * "drivers" command shows a complete picture, not just the plug-in devices.
- */
+int bus_register(bus_t *bus) {
+    if (!bus) return -1;
+    uint64_t flags = spin_lock_irqsave(&driver_model_lock);
+    bus->next = bus_head;
+    bus_head = bus;
+    spin_unlock_irqrestore(&driver_model_lock, flags);
+    kprintf("[BUS] Registered bus subsystem: %s\n", bus->name);
+    return 0;
+}
+
+int driver_module_register(driver_obj_t *drv) {
+    if (!drv) return -1;
+    uint64_t flags = spin_lock_irqsave(&driver_model_lock);
+    for (bus_t *b = bus_head; b; b = b->next) {
+        if (b->bus_type == drv->bus_type) {
+            drv->next = b->drivers;
+            b->drivers = drv;
+            /* Match against already registered devices */
+            for (device_t *dev = b->devices; dev; dev = dev->next) {
+                if (b->match && b->match(dev, drv)) {
+                    if (drv->probe) drv->probe(dev);
+                }
+            }
+            break;
+        }
+    }
+    spin_unlock_irqrestore(&driver_model_lock, flags);
+    kprintf("[DRIVER] Registered driver module: %s\n", drv->name);
+    return 0;
+}
+
+int device_register(device_t *dev) {
+    if (!dev) return -1;
+    uint64_t flags = spin_lock_irqsave(&driver_model_lock);
+    for (bus_t *b = bus_head; b; b = b->next) {
+        if (b->bus_type == dev->bus_type) {
+            dev->next = b->devices;
+            b->devices = dev;
+            /* Match against existing drivers */
+            for (driver_obj_t *drv = b->drivers; drv; drv = drv->next) {
+                if (b->match && b->match(dev, drv)) {
+                    if (drv->probe) drv->probe(dev);
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    spin_unlock_irqrestore(&driver_model_lock, flags);
+    return 0;
+}
+
+void device_hotplug(device_t *dev, int action) {
+    if (!dev) return;
+    if (action == DEVICE_HOTPLUG_ADD) {
+        kprintf("[HOTPLUG] Device added: %s\n", dev->name);
+        device_register(dev);
+    } else if (action == DEVICE_HOTPLUG_REMOVE) {
+        kprintf("[HOTPLUG] Device removed: %s\n", dev->name);
+    }
+}
+
 void driver_seed_core(void) {
     driver_register("screen", "display", "ready",
                     "VGA text / framebuffer console output");
@@ -58,12 +117,4 @@ void driver_seed_core(void) {
                     "PC speaker tones and beeps");
     driver_register("ramfs", "storage", "ready",
                     "In-memory read/write filesystem for /");
-    driver_register("devfs", "storage", "ready",
-                    "Device files under /dev");
-    driver_register("virtio-blk", "storage", "ready",
-                    "Virtio block disk (QEMU data.img)");
-    driver_register("virtio-net", "net", "ready",
-                    "Virtio network card");
-    driver_register("console", "display", "ready",
-                    "Input line and prompt management");
 }

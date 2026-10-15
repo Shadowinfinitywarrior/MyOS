@@ -38,13 +38,25 @@ static acpi_rsdp_t *find_rsdp(void) {
     return NULL;
 }
 
+static acpi_xsdt_t *xsdt = NULL;
+
 void *acpi_find_table(const char *sig) {
-    if (!rsdt) return NULL;
-    uint32_t entries = (rsdt->header.length - sizeof(acpi_sdt_header_t)) / 4;
-    for (uint32_t i = 0; i < entries; i++) {
-        acpi_sdt_header_t *hdr = (acpi_sdt_header_t *)(uintptr_t)rsdt->entries[i];
-        if (memcmp(hdr->signature, sig, 4) == 0) {
-            if (acpi_checksum(hdr, hdr->length) == 0) return hdr;
+    if (xsdt) {
+        uint32_t entries = (xsdt->header.length - sizeof(acpi_sdt_header_t)) / 8;
+        for (uint32_t i = 0; i < entries; i++) {
+            acpi_sdt_header_t *hdr = (acpi_sdt_header_t *)(uintptr_t)xsdt->entries[i];
+            if (hdr && memcmp(hdr->signature, sig, 4) == 0) {
+                if (acpi_checksum(hdr, hdr->length) == 0) return hdr;
+            }
+        }
+    }
+    if (rsdt) {
+        uint32_t entries = (rsdt->header.length - sizeof(acpi_sdt_header_t)) / 4;
+        for (uint32_t i = 0; i < entries; i++) {
+            acpi_sdt_header_t *hdr = (acpi_sdt_header_t *)(uintptr_t)rsdt->entries[i];
+            if (hdr && memcmp(hdr->signature, sig, 4) == 0) {
+                if (acpi_checksum(hdr, hdr->length) == 0) return hdr;
+            }
         }
     }
     return NULL;
@@ -54,8 +66,17 @@ void acpi_init(void) {
     rsdp = find_rsdp();
     if (!rsdp) { kprintf("[ACPI] RSDP not found!\n"); return; }
     kprintf("[ACPI] RSDP found, OEM: %.6s, revision: %u\n", rsdp->oem_id, rsdp->revision);
-    rsdt = (acpi_rsdt_t *)(uintptr_t)rsdp->rsdt_address;
-    paging_map((uint32_t)rsdt, (uint32_t)rsdt, PAGE_PRESENT | PAGE_WRITE);
+
+    if (rsdp->revision >= 2 && rsdp->xsdt_address) {
+        xsdt = (acpi_xsdt_t *)(uintptr_t)rsdp->xsdt_address;
+        paging_map((uint64_t)xsdt, (uint64_t)xsdt, PAGE_PRESENT | PAGE_WRITE);
+        kprintf("[ACPI] Using 64-bit XSDT at 0x%lx\n", (unsigned long)rsdp->xsdt_address);
+    } else if (rsdp->rsdt_address) {
+        rsdt = (acpi_rsdt_t *)(uintptr_t)rsdp->rsdt_address;
+        paging_map((uint32_t)rsdt, (uint32_t)rsdt, PAGE_PRESENT | PAGE_WRITE);
+        kprintf("[ACPI] Using 32-bit RSDT at 0x%x\n", rsdp->rsdt_address);
+    }
+
     fadt = (acpi_fadt_t *)acpi_find_table("FACP");
     if (fadt) kprintf("[ACPI] FADT found\n");
     madt = (acpi_madt_t *)acpi_find_table("APIC");
@@ -77,6 +98,8 @@ void acpi_init(void) {
         }
         kprintf("[ACPI] Detected %u CPU(s)\n", num_cpus);
     }
+    if (acpi_find_table("HPET")) kprintf("[ACPI] HPET table present\n");
+    if (acpi_find_table("MCFG")) kprintf("[ACPI] PCIe MCFG table present\n");
 }
 
 void acpi_shutdown(void) {

@@ -59,8 +59,8 @@ static bool expecting_4th_byte = false;
 static bool mouse_awaiting_ack = false;
 
 /* Mouse settings */
-static uint8_t mouse_sensitivity = 5;  /* 1-10 */
-static bool mouse_acceleration = true;
+static uint8_t mouse_sensitivity = 3;  /* 1-10, lowered for better control */
+static bool mouse_acceleration = false;  /* disabled for consistent feel */
 static int16_t last_dx = 0, last_dy = 0;
 
 /* Previous button state for event detection */
@@ -141,32 +141,17 @@ static void get_screen_bounds(int *max_x, int *max_y) {
     }
 }
 
-/* Apply sensitivity and acceleration to mouse delta */
+/* Apply sensitivity to mouse delta */
 static int apply_sensitivity(int delta) {
     if (delta == 0) return 0;
     
     int abs_delta = delta < 0 ? -delta : delta;
     int sign = delta < 0 ? -1 : 1;
     
-    /* Fine positioning (1..2 pixels): Keep exact 1:1 precision without jitter */
-    int scaled;
-    if (abs_delta <= 2) {
-        scaled = abs_delta;
-    } else {
-        /* Smooth progressive acceleration curve for fluid movement across screen */
-        if (mouse_acceleration) {
-            int extra = ((abs_delta - 2) * (abs_delta - 2)) / 8;
-            if (extra > 12) extra = 12;
-            scaled = abs_delta + extra;
-        } else {
-            scaled = abs_delta;
-        }
-    }
-    
-    /* Apply sensitivity (1-10, default 5) */
-    scaled = (scaled * (int)mouse_sensitivity) / 5;
+    /* Apply sensitivity (1-10, default 3) directly for consistent, predictable movement */
+    int scaled = (abs_delta * (int)mouse_sensitivity + 4) / 5;
     if (scaled < 1) scaled = 1;
-
+    
     return scaled * sign;
 }
 

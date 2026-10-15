@@ -86,6 +86,15 @@ extern int errno;
 #define OS_CMD_NET_BT         31
 #define OS_CMD_NET_ETH        32
 #define OS_CMD_GET_TIME       33
+#define OS_CMD_PKG_INSTALL    40
+#define OS_CMD_PKG_REMOVE     41
+#define OS_CMD_PKG_UPDATE     42
+#define OS_CMD_PKG_LIST       43
+#define OS_CMD_PKG_SHOW       44
+#define OS_CMD_PKG_STATUS     45
+#define OS_CMD_PKG_INSTALL_FILE 46
+#define OS_CMD_NOVAFS_STATUS  47
+#define OS_CMD_NOVAFS_FSCK    48
 
 /* Signal handling syscalls */
 #define SYS_SIGACTION      100

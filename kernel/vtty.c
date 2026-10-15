@@ -1,5 +1,6 @@
 #include "vtty.h"
 #include "process.h"
+#include "../include/wait_queue.h"
 #include "../lib/string.h"
 #include "../include/system.h"
 
@@ -12,12 +13,22 @@ static const uint8_t vga_palette[VGA_COLOR_COUNT] = {
 static vtty_t vttys[VTTY_MAX];
 static vtty_t *boot_console;
 static volatile int vtty_lock;
+static volatile uint64_t vtty_lock_flags;
 
 static inline void vtty_enter(void) {
-    while (__atomic_test_and_set(&vtty_lock, __ATOMIC_ACQUIRE)) { }
+    uint64_t flags;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(flags) : : "memory");
+    while (__atomic_test_and_set(&vtty_lock, __ATOMIC_ACQUIRE)) {
+        __asm__ volatile("pause" ::: "memory");
+    }
+    vtty_lock_flags = flags;
 }
 static inline void vtty_exit(void) {
+    uint64_t flags = vtty_lock_flags;
     __atomic_clear(&vtty_lock, __ATOMIC_RELEASE);
+    if (flags & 0x200) {
+        __asm__ volatile("sti" ::: "memory");
+    }
 }
 
 void vtty_init(void) {
@@ -349,6 +360,11 @@ void vtty_push_char(vtty_t *v, char c) {
         v->in_head = next;
     }
     vtty_exit();
+
+    /* Wake a reader blocked in vtty_read_blocking(), if any. Called from
+     * process context (the GUI routes keys here), so unblocking is safe. */
+    process_t *w = wait_queue_wake_one(&v->read_wait);
+    if (w) process_unblock(w);
 }
 
 void vtty_push_str(vtty_t *v, const char *s) {
@@ -367,6 +383,26 @@ bool vtty_pop_char(vtty_t *v, char *out) {
     }
     vtty_exit();
     return got;
+}
+
+/* Block the calling process until a byte is available on the vty, then return
+ * it. Replaces the busy process_yield() polling loop the console read used to
+ * run, which re-entered the scheduler millions of times a second and flushed
+ * the TLB on every switch. */
+char vtty_read_blocking(vtty_t *v) {
+    process_t *cur = process_get_current();
+    for (;;) {
+        char c;
+        if (vtty_pop_char(v, &c)) return c;
+        if (!cur) { process_sleep(1); continue; }
+
+        /* Re-check with interrupts off before sleeping so a byte that arrives
+         * between the pop above and the block below cannot be lost. */
+        cli();
+        if (!vtty_input_empty(v)) { sti(); continue; }
+        wait_queue_add(&v->read_wait, cur);
+        process_block(cur);   /* re-enables interrupts when we are resumed */
+    }
 }
 
 bool vtty_input_empty(const vtty_t *v) {

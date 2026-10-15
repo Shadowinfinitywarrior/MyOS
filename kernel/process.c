@@ -71,42 +71,16 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
     proc->time_slice = 10;
 
     /* Allocate kernel stack (16 pages for 64KB) contiguous */
-    uint64_t stack_pages[16];
-    bool stack_done = false;
-    while (!stack_done) {
-        uint64_t base = pmm_alloc_page();
-        if (!base) {
-            kprintf("[PROC] Failed to allocate kernel stack base page\n");
-            return NULL;
-        }
-        stack_pages[0] = base;
-        int count = 1;
-        bool ok = true;
-        for (int i = 1; i < 16; i++) {
-            uint64_t p = pmm_alloc_page();
-            if (!p) { ok = false; break; }
-            stack_pages[i] = p;
-            if (p != base + i * PAGE_SIZE) { ok = false; break; }
-            count++;
-        }
-        if (ok && count == 16) {
-            proc->kernel_stack_base = base;
-            stack_done = true;
-        } else {
-            /* free only pages actually allocated */
-            for (int j = 0; j < count; j++) {
-                pmm_free_page(stack_pages[j]);
-            }
-            /* also free any partially allocated extra pages if ok failed after allocation */
-            /* count already accounts for successfully checked pages */
-            continue;
-        }
+    uint64_t base = pmm_alloc_contiguous(16);
+    if (!base) {
+        kprintf("[PROC] Failed to allocate kernel stack base page\n");
+        return NULL;
     }
+    proc->kernel_stack_base = base;
     /* Zero stack memory */
     memset((void*)(uintptr_t)proc->kernel_stack_base, 0, KERNEL_STACK_SIZE);
     proc->kernel_stack = proc->kernel_stack_base + KERNEL_STACK_SIZE;
     proc->kernel_stack -= 8; /* ABI alignment: RSP % 16 == 8 at entry */
-    kprintf("[PROC] kernel stack base=0x%llx top=0x%llx\n", (unsigned long long)proc->kernel_stack_base, (unsigned long long)proc->kernel_stack);
 
     /* Set up initial context for first switch */
     proc->context.rsp = proc->kernel_stack;
@@ -122,10 +96,8 @@ process_t *process_create_kernel(const char *name, void (*entry)(void)) {
     for (int i = 0; i < MAX_OPEN_FILES; i++)
         proc->fd_table[i].in_use = 0;
 
-    kprintf("[PROC] about to call vfs_resolve_path\n");
     /* Open stdin/stdout/stderr (FDs 0, 1, 2) */
     vfs_node_t *console = vfs_resolve_path("/dev/console");
-    kprintf("[PROC] vfs_resolve_path returned 0x%lx\n", (uint64_t)console);
     if (console) {
         for (int i = 0; i < 3; i++) {
             proc->fd_table[i].in_use = 1;
@@ -160,34 +132,12 @@ process_t *process_create_user(const char *name, const uint8_t *elf_data, uint64
     }
 
     /* Allocate kernel stack (16 pages for 64KB) contiguous */
-    uint64_t stack_pages[16];
-    bool stack_done = false;
-    while (!stack_done) {
-        uint64_t base = pmm_alloc_page();
-        if (!base) {
-            kprintf("[PROC] Failed to allocate kernel stack base page (user)\n");
-            return NULL;
-        }
-        stack_pages[0] = base;
-        int count = 1;
-        bool ok = true;
-        for (int i = 1; i < 16; i++) {
-            uint64_t p = pmm_alloc_page();
-            if (!p) { ok = false; break; }
-            stack_pages[i] = p;
-            if (p != base + i * PAGE_SIZE) { ok = false; break; }
-            count++;
-        }
-        if (ok && count == 16) {
-            proc->kernel_stack_base = base;
-            stack_done = true;
-        } else {
-            for (int j = 0; j < count; j++) {
-                pmm_free_page(stack_pages[j]);
-            }
-            continue;
-        }
+    uint64_t base = pmm_alloc_contiguous(16);
+    if (!base) {
+        kprintf("[PROC] Failed to allocate kernel stack (user)\n");
+        return NULL;
     }
+    proc->kernel_stack_base = base;
     memset((void*)(uintptr_t)proc->kernel_stack_base, 0, KERNEL_STACK_SIZE);
     proc->kernel_stack = proc->kernel_stack_base + KERNEL_STACK_SIZE;
     proc->kernel_stack -= 8;
@@ -411,33 +361,13 @@ pid_t process_fork(registers_t *frame) {
     }
 
     /* Allocate kernel stack (16 pages for 64KB) contiguous */
-    uint64_t stack_pages[16];
-    bool stack_done = false;
-    while (!stack_done) {
-        uint64_t base = pmm_alloc_page();
-        if (!base) {
-            kprintf("[PROC] fork: failed to allocate kernel stack base\n");
-            child->state = PROC_UNUSED;
-            return -1;
-        }
-        stack_pages[0] = base;
-        int count = 1;
-        bool ok = true;
-        for (int i = 1; i < 16; i++) {
-            uint64_t p = pmm_alloc_page();
-            if (!p) { ok = false; break; }
-            stack_pages[i] = p;
-            if (p != base + i * PAGE_SIZE) { ok = false; break; }
-            count++;
-        }
-        if (ok && count == 16) {
-            child->kernel_stack_base = base;
-            stack_done = true;
-        } else {
-            for (int j = 0; j < count; j++) pmm_free_page(stack_pages[j]);
-            continue;
-        }
+    uint64_t base = pmm_alloc_contiguous(16);
+    if (!base) {
+        kprintf("[PROC] fork: failed to allocate kernel stack\n");
+        child->state = PROC_UNUSED;
+        return -1;
     }
+    child->kernel_stack_base = base;
     child->kernel_stack = child->kernel_stack_base + KERNEL_STACK_SIZE;
     child->kernel_stack -= 8;
 
@@ -473,6 +403,26 @@ pid_t process_fork(registers_t *frame) {
     cframe->rax = 0;
     cframe->int_no = 0;
     cframe->err_code = 0;
+
+/* Set context at the byte offsets expected by context_switch assembly:
+ *   byte 64 from context start  -> RSP (kernel stack pointer)
+ *   byte 72 from context start  -> RIP (fork_child_iret)
+ *   byte 80 from context start  -> RFLAGS (0x202)
+ * These fixed byte offsets differ from the C struct field offsets,
+ * so we directly write to the context buffer using uint64_t indexing.
+ */
+    uint64_t *ctx = (uint64_t *)&child->context;
+
+    /* Byte offset 64 (word index 8): RSP = cframe (kernel stack frame) */
+    ctx[8] = (uint64_t)cframe;
+
+    /* Byte offset 72 (word index 9): RIP = fork_child_iret */
+    ctx[9] = (uint64_t)fork_child_iret;
+
+    /* Byte offset 80 (word index 10): RFLAGS = 0x202 */
+    ctx[10] = 0x202;
+
+    /* Also maintain C struct field consistency for other users */
     child->context.rsp = (uint64_t)cframe;
     child->context.rip = (uint64_t)fork_child_iret;
     child->context.rflags = 0x202;

@@ -92,52 +92,60 @@ uint64_t timer_get_ms64(void) {
     return ms;
 }
 
+#include "../include/spinlock.h"
+
+static spinlock_t timer_lock = SPINLOCK_INIT;
+
 int timer_add(uint32_t delay_ms, timer_callback_t cb, void *arg) {
     if (!cb) return -1;
     struct timer_event *ev = (struct timer_event *)kmalloc(sizeof(struct timer_event));
     if (!ev) return -1;
-    uint64_t eflags;
-    __asm__ volatile("pushfq; popq %0" : "=r"(eflags));
-    __asm__ volatile("cli");
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
     uint64_t now = timer_get_ms64();
     ev->expire_ms = now + delay_ms;
     ev->cb = cb;
     ev->arg = arg;
     ev->next = timer_list;
     timer_list = ev;
-    __asm__ volatile("pushq %0; popfq" :: "r"(eflags));
+    spin_unlock_irqrestore(&timer_lock, flags);
     return 0;
 }
 
 void timer_del(struct timer_event *ev) {
     if (!ev) return;
-    uint64_t eflags;
-    __asm__ volatile("pushfq; popq %0" : "=r"(eflags));
-    __asm__ volatile("cli");
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
     struct timer_event **cur = &timer_list;
     while (*cur) {
         if (*cur == ev) {
             *cur = ev->next;
-            __asm__ volatile("pushq %0; popfq" :: "r"(eflags));
+            spin_unlock_irqrestore(&timer_lock, flags);
             kfree(ev);
             return;
         }
         cur = &(*cur)->next;
     }
-    __asm__ volatile("pushq %0; popfq" :: "r"(eflags));
+    spin_unlock_irqrestore(&timer_lock, flags);
 }
 
 void timer_tick_process(void) {
+    uint64_t flags = spin_lock_irqsave(&timer_lock);
     uint64_t now = timer_get_ms64();
     struct timer_event **cur = &timer_list;
     while (*cur) {
         struct timer_event *ev = *cur;
         if (ev->expire_ms <= now) {
             *cur = ev->next;
-            if (ev->cb) ev->cb(ev->arg);
+            if (ev->cb) {
+                timer_callback_t cb = ev->cb;
+                void *arg = ev->arg;
+                spin_unlock_irqrestore(&timer_lock, flags);
+                cb(arg);
+                flags = spin_lock_irqsave(&timer_lock);
+            }
             kfree(ev);
         } else {
             cur = &(*cur)->next;
         }
     }
+    spin_unlock_irqrestore(&timer_lock, flags);
 }

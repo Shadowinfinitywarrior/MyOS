@@ -90,6 +90,15 @@
 #define OS_CMD_NET_BT         31
 #define OS_CMD_NET_ETH        32
 #define OS_CMD_GET_TIME       33
+#define OS_CMD_PKG_INSTALL    40
+#define OS_CMD_PKG_REMOVE     41
+#define OS_CMD_PKG_UPDATE     42
+#define OS_CMD_PKG_LIST       43
+#define OS_CMD_PKG_SHOW       44
+#define OS_CMD_PKG_STATUS     45
+#define OS_CMD_PKG_INSTALL_FILE 46
+#define OS_CMD_NOVAFS_STATUS  47
+#define OS_CMD_NOVAFS_FSCK    48
 
 /* IPC/MYDP syscalls for cross-language integration */
 #define SYS_IPC_PORT_CREATE       70
@@ -118,6 +127,23 @@
 #define SYS_SIGACTION      100
 #define SYS_SIGRETURN      101
 #define SYS_SIGPROCMASK    102
+
+/* Professional ABI Versioning & Extended Subsystems */
+#define ABI_VERSION_MAJOR 1
+#define ABI_VERSION_MINOR 0
+#define ABI_VERSION_PATCH 0
+
+#define SYS_ABI_VERSION    103
+#define SYS_GETRANDOM      104
+#define SYS_SOCKET         105
+#define SYS_BIND           106
+#define SYS_LISTEN         107
+#define SYS_ACCEPT         108
+#define SYS_CONNECT        109
+#define SYS_POLL           110
+#define SYS_DLOPEN         111
+#define SYS_DLSYM          112
+#define SYS_DLCLOSE        113
 
 #define NUM_SYSCALLS 256
 

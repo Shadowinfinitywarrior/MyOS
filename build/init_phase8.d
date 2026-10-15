@@ -8,8 +8,10 @@ build/init_phase8.o: kernel/init_phase8.c kernel/../lib/string.h \
  kernel/../drivers/serial.h kernel/../drivers/../include/system.h \
  kernel/../drivers/virtio.h kernel/../drivers/virtio_blk.h \
  kernel/../drivers/virtio_net.h kernel/../fs/vfs.h \
- kernel/../fs/../include/types.h kernel/../fs/devfs.h \
- kernel/../fs/../include/system.h kernel/../fs/vfs.h kernel/../fs/ramfs.h
+ kernel/../fs/../include/types.h kernel/../fs/../include/spinlock.h \
+ kernel/../fs/../include/types.h kernel/../fs/../include/system.h \
+ kernel/../fs/devfs.h kernel/../fs/../include/system.h kernel/../fs/vfs.h \
+ kernel/../fs/ramfs.h
 kernel/../lib/string.h:
 kernel/../lib/../include/types.h:
 kernel/../include/system.h:
@@ -33,6 +35,9 @@ kernel/../drivers/virtio_blk.h:
 kernel/../drivers/virtio_net.h:
 kernel/../fs/vfs.h:
 kernel/../fs/../include/types.h:
+kernel/../fs/../include/spinlock.h:
+kernel/../fs/../include/types.h:
+kernel/../fs/../include/system.h:
 kernel/../fs/devfs.h:
 kernel/../fs/../include/system.h:
 kernel/../fs/vfs.h:

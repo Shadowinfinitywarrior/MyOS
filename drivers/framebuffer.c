@@ -112,7 +112,7 @@ void fb_init(void) {
         uint32_t fb_size = (uint32_t)w * (uint32_t)h * (bpp / 8);
         uint32_t fb_size_pages = (fb_size + PAGE_SIZE - 1) / PAGE_SIZE;
         for (uint32_t offset = 0; offset < fb_size_pages * PAGE_SIZE; offset += PAGE_SIZE) {
-            paging_map(fb.virt_addr + offset, fb.phys_addr + offset, PAGE_PRESENT | PAGE_WRITE | PAGE_NOCACHE);
+            paging_map(fb.virt_addr + offset, fb.phys_addr + offset, PAGE_PRESENT | PAGE_WRITE | PAGE_WC);
         }
     } else {
         fb.virt_addr = fb_phys;
@@ -184,6 +184,10 @@ void fb_add_damage(int x, int y, int w, int h) {
             int ny = r->y < y ? r->y : y;
             int ex = (r->x + r->w) > (x + w) ? (r->x + r->w) : (x + w);
             int ey = (r->y + r->h) > (y + h) ? (r->y + r->h) : (y + h);
+            if (nx < 0) nx = 0;
+            if (ny < 0) ny = 0;
+            if (ex > (int)fb.width)  ex = (int)fb.width;
+            if (ey > (int)fb.height) ey = (int)fb.height;
             r->x = nx; r->y = ny; r->w = ex - nx; r->h = ey - ny;
             return;
         }
@@ -204,12 +208,18 @@ void fb_add_damage(int x, int y, int w, int h) {
 
 static void fb_copy_to_lfb(int x, int y, int w, int h) {
     if (!bb || fb.virt_addr == 0) return;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > (int)fb.width)  w = (int)fb.width - x;
+    if (y + h > (int)fb.height) h = (int)fb.height - y;
+    if (w <= 0 || h <= 0) return;
+
     uint32_t *dst = (uint32_t *)(uintptr_t)fb.virt_addr;
     uint32_t lfb_stride = fb.pitch / 4;
     for (int row = 0; row < h; row++) {
-        const uint32_t *s = bb + (uint32_t)((y + row) * bb_stride + x);
-        uint32_t *d = dst + (uint32_t)((y + row) * lfb_stride + x);
-        for (int col = 0; col < w; col++) d[col] = s[col];
+        const uint32_t *s = bb + (size_t)(y + row) * (size_t)bb_stride + (size_t)x;
+        uint32_t *d = dst + (size_t)(y + row) * (size_t)lfb_stride + (size_t)x;
+        memcpy(d, s, (size_t)w * 4);
     }
 }
 

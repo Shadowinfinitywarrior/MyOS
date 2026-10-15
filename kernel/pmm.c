@@ -111,12 +111,12 @@ int pmm_reserve_range(uint64_t start, uint64_t end) {
     return reserved;
 }
 
+#include "../include/spinlock.h"
+
+static spinlock_t pmm_lock = SPINLOCK_INIT;
+
 uint64_t pmm_alloc_page(void) {
-    /* Serialize against interrupt-context allocations (timer ISR, page-fault
-     * path) on the BSP. A real SMP implementation must upgrade this to a
-     * per-page-manager spinlock with IRQ-save/restore. */
-    const uint64_t eflags = read_eflags();
-    cli();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     uint64_t result = 0;
     for (uint64_t i = 0; i < total_pages; i++) {
         if (!bitmap_test(i)) {
@@ -135,14 +135,13 @@ uint64_t pmm_alloc_page(void) {
             break;
         }
     }
-    if (eflags & (1ULL << 9)) sti();
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return result;
 }
 
 uint64_t pmm_alloc_contiguous(uint32_t pages) {
     if (pages == 0) return 0;
-    const uint64_t eflags = read_eflags();
-    cli();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     uint64_t result = 0;
     uint64_t offset = 0;
     for (uint32_t r = 0; r < region_count && result == 0; r++) {
@@ -166,14 +165,13 @@ uint64_t pmm_alloc_contiguous(uint32_t pages) {
         }
         offset += rp;
     }
-    if (eflags & (1ULL << 9)) sti();
+    spin_unlock_irqrestore(&pmm_lock, flags);
     return result;
 }
 
 void pmm_free_page(uint64_t phys) {
     if (phys == 0) return;
-    const uint64_t eflags = read_eflags();
-    cli();
+    uint64_t flags = spin_lock_irqsave(&pmm_lock);
     for (uint32_t r = 0; r < region_count; r++) {
         uint64_t start = region_start[r];
         uint64_t end = start + region_pages[r] * PAGE_SIZE;
@@ -189,7 +187,7 @@ void pmm_free_page(uint64_t phys) {
             break;
         }
     }
-    if (eflags & (1ULL << 9)) sti();
+    spin_unlock_irqrestore(&pmm_lock, flags);
 }
 
 uint64_t pmm_get_free_pages(void) { return free_pages; }

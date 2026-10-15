@@ -50,12 +50,10 @@ isr_common_stub:
     mov fs, ax
     mov gs, ax
     mov rdi, rsp
-    and rsp, -16       ; Align RSP to 16 bytes (ABI: callee entry must be rsp%16==8)
-    sub rsp, 16        ; Reserve a slot that survives isr_handler's own stack pushes
-    mov [rsp + 8], rdi ; Stash original RSP at [A-8]: above the call's return
-                       ; address ([A-24]) and above everything the handler pushes
+    push rdi           ; save original RSP; also aligns RSP to 16 bytes for call
     call isr_handler
-    mov rsp, [rsp + 8]
+    pop rsp            ; restore original RSP
+
     pop r15
     pop r14
     pop r13

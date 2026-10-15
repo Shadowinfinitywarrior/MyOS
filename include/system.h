@@ -30,14 +30,14 @@ static inline void hlt(void) { __asm__ __volatile__("hlt"); }
 static inline void stac(void) {
     uint64_t bits = 1ULL << 18;
     __asm__ __volatile__("pushfq\n\t"
-                         "orq %0, 8(%%rsp)\n\t"
+                         "orq %0, (%%rsp)\n\t"
                          "popfq"
                          : : "r"(bits) : "memory", "cc");
 }
 static inline void clac(void) {
     uint64_t bits = ~(1ULL << 18);
     __asm__ __volatile__("pushfq\n\t"
-                         "andq %0, 8(%%rsp)\n\t"
+                         "andq %0, (%%rsp)\n\t"
                          "popfq"
                          : : "r"(bits) : "memory", "cc");
 }

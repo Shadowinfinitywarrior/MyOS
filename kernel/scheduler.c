@@ -63,6 +63,7 @@ void scheduler_remove(process_t *proc) {
     if (flags & 0x200) sti();
 }
 
+__attribute__((optimize("no-optimize-sibling-calls"), noinline))
 void scheduler_schedule(void) {
     if (!scheduler_enabled) return;
     process_t *current = process_get_current();
@@ -97,23 +98,34 @@ void scheduler_schedule(void) {
         tss_set_rsp0(next->kernel_stack);
         syscall_set_kernel_stack(next->kernel_stack);
     }
-    if (next->page_dir && next->page_dir != paging_get_directory()) {
+    /* Always switch CR3 to the next process's address space.
+     * The old guard (page_dir != kernel_dir) caused the CPU to stay on
+     * a user process's CR3 when scheduling kernel processes (desktop,
+     * init, etc.), corrupting everything when those user tables were freed. */
+    if (next->page_dir) {
         paging_switch_directory(next->page_dir);
+    } else {
+        paging_switch_directory(paging_get_directory());
     }
     if (current) {
         context_switch(&current->context, &next->context);
     } else {
         context_switch(NULL, &next->context);
     }
+    __asm__ volatile("" ::: "memory");
 }
 
+__attribute__((optimize("no-optimize-sibling-calls"), noinline))
 void scheduler_tick(void) {
     process_t *current = process_get_current();
     if (!current || !scheduler_enabled) return;
     current->total_time++;
     scheduler_wake_sleepers();
     if (current->time_slice > 0) current->time_slice--;
-    if (current->time_slice == 0) scheduler_schedule();
+    if (current->time_slice == 0) {
+        scheduler_schedule();
+        __asm__ volatile("" ::: "memory");
+    }
 }
 
 void scheduler_wake_sleepers(void) {

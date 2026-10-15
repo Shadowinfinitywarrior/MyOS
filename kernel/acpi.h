@@ -32,6 +32,24 @@ typedef struct acpi_rsdt {
     uint32_t          entries[];
 } PACKED acpi_rsdt_t;
 
+typedef struct acpi_xsdt {
+    acpi_sdt_header_t header;
+    uint64_t          entries[];
+} PACKED acpi_xsdt_t;
+
+typedef struct acpi_hpet {
+    acpi_sdt_header_t header;
+    uint32_t          event_timer_block_id;
+    uint8_t           address_space_id;
+    uint8_t           register_bit_width;
+    uint8_t           register_bit_offset;
+    uint8_t           reserved;
+    uint64_t          address;
+    uint8_t           hpet_number;
+    uint16_t          minimum_tick;
+    uint8_t           page_protection;
+} PACKED acpi_hpet_t;
+
 typedef struct acpi_fadt {
     acpi_sdt_header_t header;
     uint32_t firmware_ctrl;

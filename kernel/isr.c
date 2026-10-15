@@ -27,6 +27,9 @@ void isr_handler(registers_t *regs) {
         handlers[vector](regs);
     } else if (vector < 32) {
         extern void serial_printf(const char *fmt, ...);
+        extern void crash_dump_save(const char *msg, registers_t *regs);
+        crash_dump_save("Unhandled Exception", regs);
+
         serial_printf("[ISR] Unhandled Exception %d\n", vector);
         serial_printf("RIP=0x%lx RSP=0x%lx CS=0x%lx err=0x%lx\n",
                       (unsigned long)regs->rip, (unsigned long)regs->rsp,

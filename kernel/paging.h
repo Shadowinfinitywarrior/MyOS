@@ -7,7 +7,8 @@
 #define PAGE_PRESENT 1
 #define PAGE_WRITE 2
 #define PAGE_USER 4
-#define PAGE_NOCACHE 16
+#define PAGE_WC 8       /* write-combining: PWT selects PAT entry 1 */
+#define PAGE_NOCACHE 16 /* uncached: PCD selects PAT entry 2 */
 #define PAGE_NX (1ULL << 63)
 
 /* A page-directory handle. This is NOT the page table itself: the tables are

@@ -22,10 +22,12 @@
 #include "../kernel/power_net.h"
 #include "../include/rust_gui.h"
 
+#include "glass.h"
+
 /* ---- layout & geometry -------------------------------------------------- */
 
 static int scr_w, scr_h;
-static int topbar_h = 26;
+static int topbar_h = 32;
 static int dock_w = 380, dock_h = 48, dock_x, dock_y;
 static int lnav_w = 46, lnav_h = 260, lnav_x = 8, lnav_y = 36;
 static int workarea_bottom;
@@ -43,11 +45,26 @@ static int         menu_hot = -1;
 static int         dock_hot = -1;
 static int         lnav_hot = -1;
 static bool        wallpaper_done;
+static bool        lock_force_full = true;
 static uint32_t    last_clock_s;
-static char        clock_buf[32];
+static char        clock_buf[48];
+static int         hit_launcher_x0 = 0, hit_launcher_x1 = 0;
 static int         hit_clock_x0 = 0, hit_clock_x1 = 0;
 static int         hit_batt_x0 = 0, hit_batt_x1 = 0;
 static int         hit_net_x0 = 0, hit_net_x1 = 0;
+static int         hit_bell_x0 = 0, hit_bell_x1 = 0;
+static int         hit_lock_x0 = 0, hit_lock_x1 = 0;
+
+/* Notification toast state */
+typedef struct {
+    char     title[32];
+    char     msg[64];
+    color_t  accent;
+    uint32_t expire_s;
+    bool     active;
+} desktop_toast_t;
+
+static desktop_toast_t current_toast = { "", "", 0, 0, false };
 
 int desktop_workarea_bottom(void) { return workarea_bottom; }
 
@@ -168,7 +185,9 @@ bool desktop_launch(const char *name) {
         desktop_invalidate();
         return true;
     }
-    if (strcmp(name, "files") == 0 || strcmp(name, "storage") == 0) {
+    if (strcmp(name, "files") == 0 || strcmp(name, "storage") == 0 ||
+        strcmp(name, "novafs") == 0 || strcmp(name, "packages") == 0 ||
+        strcmp(name, "apt") == 0) {
         launch_files();
         desktop_invalidate();
         return true;
@@ -216,15 +235,6 @@ bool desktop_launch(const char *name) {
     return false;
 }
 
-static bool app_is_running(const char *name) {
-    int n = wm_window_count();
-    for (int i = 0; i < n; i++) {
-        wm_window_t *w = wm_window_by_creation(i);
-        if (w && strstr(w->title, name)) return true;
-    }
-    return false;
-}
-
 /* ---- wallpaper ----------------------------------------------------------- */
 
 static surface_t *wallpaper_surf;
@@ -260,6 +270,38 @@ static int mountain_profile(int x) {
     return interp + jag;
 }
 
+/* Blend one radial glow orb. Only the orb's bounding box is touched: pixels
+ * outside the radius were no-ops in the old full-screen pass, so restricting
+ * the loop is visually identical but avoids a read-modify-write over the whole
+ * sky region per orb. */
+static void apply_orb(uint32_t *p, int stride, int w, int water_y,
+                      int cx, int cy, int rad, int ar, int ag, int ab) {
+    int rad2 = rad * rad;
+    int y0 = cy - rad; if (y0 < 0) y0 = 0;
+    int y1 = cy + rad; if (y1 > water_y - 1) y1 = water_y - 1;
+    int x0 = cx - rad; if (x0 < 0) x0 = 0;
+    int x1 = cx + rad; if (x1 > w - 1) x1 = w - 1;
+    for (int y = y0; y <= y1; y++) {
+        int dy = y - cy, dy_sq = dy * dy;
+        uint32_t *row = p + (size_t)y * (size_t)stride;
+        for (int x = x0; x <= x1; x++) {
+            int dx = x - cx;
+            int d = dx * dx + dy_sq;
+            if (d >= rad2) continue;
+            uint32_t cur = row[x];
+            uint32_t factor = 255 - (uint32_t)(d * 255 / rad2);
+            uint32_t t = (factor * factor) / 255;
+            uint32_t cr = ((cur >> 16) & 0xFF) + (uint32_t)(ar * t) / 255;
+            uint32_t cg = ((cur >> 8) & 0xFF) + (uint32_t)(ag * t) / 255;
+            uint32_t cb = (cur & 0xFF) + (uint32_t)(ab * t) / 255;
+            if (cr > 255) cr = 255;
+            if (cg > 255) cg = 255;
+            if (cb > 255) cb = 255;
+            row[x] = (cr << 16) | (cg << 8) | cb;
+        }
+    }
+}
+
 static void draw_wallpaper(void) {
     if (!wallpaper_surf) {
         wallpaper_surf = surface_create(scr_w, scr_h);
@@ -274,23 +316,35 @@ static void draw_wallpaper(void) {
     int moon_cy = (scr_h * 18) / 100;
     int moon_rad = 22;
 
-    /* 1. Sky Gradient (y = 0 .. water_y) */
+    /* 1. Sky Gradient: Deep cosmic sapphire into luminous midnight violet */
     for (int y = 0; y < water_y; y++) {
         uint32_t t = (uint32_t)((uint64_t)y * 255 / (uint64_t)water_y);
-        uint32_t r = 2 + (14 * t) / 255;
-        uint32_t g = 4 + (24 * t) / 255;
-        uint32_t b = 12 + (46 * t) / 255;
+        uint32_t r = 6 + (20 * t) / 255;
+        uint32_t g = 8 + (28 * t) / 255;
+        uint32_t b = 24 + (58 * t) / 255;
         if (current_theme_id == 1) { /* emerald */
-            g += (40 * t) / 255; b -= (10 * t) / 255;
+            g += (45 * t) / 255; b -= (8 * t) / 255;
         } else if (current_theme_id == 2) { /* amber */
-            r += (50 * t) / 255; g += (25 * t) / 255; b -= (10 * t) / 255;
+            r += (55 * t) / 255; g += (25 * t) / 255; b -= (10 * t) / 255;
         } else if (current_theme_id == 3) { /* cyberpunk */
-            r += (35 * t) / 255; b += (30 * t) / 255;
+            r += (42 * t) / 255; b += (36 * t) / 255;
         }
         uint32_t c = (r << 16) | (g << 8) | b;
         uint32_t *row = p + (size_t)y * (size_t)stride;
         for (int x = 0; x < scr_w; x++) row[x] = c;
     }
+
+    /* 2. Glassmorphic Chromatic Glowing Nebula Orbs (bounded to their circles) */
+    int orb1_cx = (scr_w * 76) / 100;
+    int orb1_cy = (scr_h * 24) / 100;
+    int orb1_rad = 145;
+
+    int orb2_cx = (scr_w * 22) / 100;
+    int orb2_cy = (scr_h * 48) / 100;
+    int orb2_rad = 135;
+
+    apply_orb(p, stride, scr_w, water_y, orb1_cx, orb1_cy, orb1_rad, 135, 35, 160);
+    apply_orb(p, stride, scr_w, water_y, orb2_cx, orb2_cy, orb2_rad, 25, 125, 170);
 
     /* 2. Moon & Celestial Aura */
     int aura_rad = 85;
@@ -377,14 +431,15 @@ static void draw_wallpaper(void) {
         int ref_y = water_y - 1 - (dy * 7) / 10;
         if (ref_y < 0) ref_y = 0;
 
+        int wave_dx = ((y * 13) % 9) - 4;
         uint32_t *row = p + (size_t)y * (size_t)stride;
+        uint32_t *rrow = p + (size_t)ref_y * (size_t)stride;
         for (int x = 0; x < scr_w; x++) {
-            int wave_dx = ((y * 13) % 9) - 4;
             int rx = x + wave_dx;
             if (rx < 0) rx = 0;
             if (rx >= scr_w) rx = scr_w - 1;
 
-            uint32_t ref_c = p[(size_t)ref_y * (size_t)stride + rx];
+            uint32_t ref_c = rrow[rx];
             uint32_t rr = (ref_c >> 16) & 0xFF;
             uint32_t rg = (ref_c >> 8) & 0xFF;
             uint32_t rb = ref_c & 0xFF;
@@ -568,15 +623,25 @@ static void draw_text_bb(uint32_t *bb, int stride, const baked_font_t *f,
     }
 }
 
-/* ---- clock --------------------------------------------------------------- */
+/* ---- clock & date -------------------------------------------------------- */
+
+static const char *month_names[12] = {
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+};
 
 void desktop_format_clock(char *buf, int len, bool with_seconds) {
     datetime_t t;
     rtc_get_time(&t);
+    /* Add IST offset (UTC+5:30 = 330 minutes) */
+    int total_minutes = t.hour * 60 + t.minute + 330;
+    t.hour = (total_minutes / 60) % 24;
+    t.minute = total_minutes % 60;
+    const char *mname = (t.month >= 1 && t.month <= 12) ? month_names[t.month - 1] : "Oct";
+    uint32_t day_val = (t.day >= 1 && t.day <= 31) ? t.day : 11;
     if (with_seconds) {
-        snprintf(buf, len, "%02u:%02u:%02u", t.hour, t.minute, t.second);
+        snprintf(buf, len, "%02u:%02u:%02u  •  %s %u", t.hour, t.minute, t.second, mname, day_val);
     } else {
-        snprintf(buf, len, "%02u:%02u", t.hour, t.minute);
+        snprintf(buf, len, "%02u:%02u  •  %s %u", t.hour, t.minute, mname, day_val);
     }
 }
 
@@ -675,122 +740,192 @@ static void draw_app_tile(uint32_t *bb, int stride, int x, int y, int size, int 
     }
 }
 
-/* ---- Top Status Bar ----------------------------------------------------- */
+/* ---- Notification Toasts & Top Status Bar ------------------------------ */
 
+void desktop_show_notification(const char *title, const char *msg, color_t accent) {
+    if (!title || !msg) return;
+    ui_strcpy(current_toast.title, sizeof(current_toast.title), title);
+    ui_strcpy(current_toast.msg, sizeof(current_toast.msg), msg);
+    current_toast.accent = accent;
+    current_toast.expire_s = timer_get_seconds() + 4; /* Display for 4 seconds */
+    current_toast.active = true;
+    speaker_play_chime();
+    fb_add_damage(scr_w - 320, 40, 310, 80);
+}
+
+static void draw_notifications(uint32_t *bb, int stride) {
+    if (!current_toast.active) return;
+    uint32_t now = timer_get_seconds();
+    if (now >= current_toast.expire_s) {
+        current_toast.active = false;
+        fb_add_damage(scr_w - 320, 40, 310, 80);
+        return;
+    }
+    int nw = 290, nh = 62;
+    int nx = scr_w - nw - 16;
+    int ny = topbar_h + 12;
+    glass_render_notification(bb, stride, nx, ny, nw, nh,
+                              current_toast.title, current_toast.msg, current_toast.accent);
+}
+
+/* Floating Top System Panel (18px radius) */
 static void draw_top_bar(uint32_t *bb, int stride) {
-    rect_t bar = { 0, 0, scr_w, topbar_h };
-    draw_rect_aa(bb, stride, &bar, RGB(10, 14, 22), 235);
-    rect_t edge = { 0, topbar_h - 1, scr_w, 1 };
-    draw_rect_aa(bb, stride, &edge, RGB(35, 48, 68), 255);
+    int bar_margin = 8;
+    int bar_x = bar_margin;
+    int bar_y = 6;
+    int bar_w = scr_w - (bar_margin * 2);
+    int bar_h = 30;
+    rect_t bar = { bar_x, bar_y, bar_w, bar_h };
 
-    /* Left: Brand typography + Active focus breadcrumb */
-    draw_text_bb(bb, stride, font_bold(), 14, 6, "MyOS", RGB(255, 255, 255));
-    draw_text_bb(bb, stride, font_ui(), 54, 6, "|", RGB(70, 85, 110));
+    /* 1. Ambient drop shadow under floating panel */
+    rect_t sh1 = { bar_x + 1, bar_y + 3, bar_w, bar_h };
+    draw_round_rect(bb, stride, &sh1, 16, RGB(0, 0, 0), 100);
+
+    /* 2. Frosted glass panel surface */
+    glass_render_panel(bb, stride, &bar);
+
+    /* --- Left Section: MyOS Launcher Button + Focus Breadcrumb --- */
+    rect_t btn_launch = { bar_x + 8, bar_y + 3, 76, bar_h - 6 };
+    hit_launcher_x0 = btn_launch.x;
+    hit_launcher_x1 = btn_launch.x + btn_launch.w;
+    glass_render_button(bb, stride, &btn_launch, " MyOS", font_bold(), menu_open, false, RGB(255, 255, 255));
+    logo_draw_buffer(bb, stride, scr_w, scr_h, btn_launch.x + 12, bar_y + bar_h / 2, 14);
+
+    /* Active Window Title Breadcrumb */
     wm_window_t *fw = wm_focused();
     const char *status_str = (fw && fw->title[0]) ? fw->title : "Desktop";
-    draw_text_bb(bb, stride, font_ui(), 66, 6, status_str, RGB(160, 185, 220));
+    draw_text_bb(bb, stride, font_ui(), bar_x + 94, bar_y + 8, "/", RGB(90, 115, 155));
+    draw_text_bb(bb, stride, font_ui(), bar_x + 104, bar_y + 8, status_str, RGB(190, 215, 248));
 
-    /* Right System Tray: Wi-Fi, Volume, Battery, Clock, User Profile */
-    int cur_rx = scr_w - 18;
+    /* --- Center Section: Clock & Date Capsule --- */
+    if (last_clock_s == 0) desktop_format_clock(clock_buf, sizeof(clock_buf), true);
+    int cw = text_width(font_mono(), clock_buf);
+    int center_x = bar_x + (bar_w - cw - 24) / 2;
+    rect_t clock_pill = { center_x, bar_y + 3, cw + 24, bar_h - 6 };
+    hit_clock_x0 = clock_pill.x;
+    hit_clock_x1 = clock_pill.x + clock_pill.w;
 
-    /* User Profile Card */
+    draw_round_rect(bb, stride, &clock_pill, 11, RGB(22, 30, 48), 185);
+    draw_round_outline(bb, stride, &clock_pill, 11, RGB(90, 140, 220), 1, 150);
+    rect_t c_shine = { center_x + 8, bar_y + 4, cw + 8, 1 };
+    draw_rect_aa(bb, stride, &c_shine, RGB(255, 255, 255), 110);
+    draw_text_bb(bb, stride, font_mono(), center_x + 12, bar_y + 8, clock_buf, RGB(244, 246, 255));
+
+    /* --- Right Section: Status Tray Controls --- */
+    int cur_rx = bar_x + bar_w - 12;
+
+    /* 1. Power / Screen Lock Button */
+    rect_t lock_btn = { cur_rx - 26, bar_y + 3, 26, bar_h - 6 };
+    hit_lock_x0 = lock_btn.x;
+    hit_lock_x1 = lock_btn.x + lock_btn.w;
+    draw_round_rect(bb, stride, &lock_btn, 6, RGB(38, 52, 82), 190);
+    draw_round_outline(bb, stride, &lock_btn, 6, RGB(100, 150, 230), 1, 160);
+    /* Power icon symbol */
+    px(bb, stride, lock_btn.x + 13, lock_btn.y + 6, RGB(255, 100, 100));
+    px(bb, stride, lock_btn.x + 13, lock_btn.y + 7, RGB(255, 100, 100));
+    px(bb, stride, lock_btn.x + 13, lock_btn.y + 8, RGB(255, 100, 100));
+    for (int a = -4; a <= 4; a++) {
+        px(bb, stride, lock_btn.x + 13 + a, lock_btn.y + 14, RGB(255, 130, 130));
+    }
+    px(bb, stride, lock_btn.x + 8, lock_btn.y + 11, RGB(255, 130, 130));
+    px(bb, stride, lock_btn.x + 18, lock_btn.y + 11, RGB(255, 130, 130));
+    cur_rx -= 34;
+
+    /* 2. User Profile Capsule (@myos) */
     const char *cur_u = auth_get_current_user();
     char ubadge[AUTH_NAME_MAX + 2];
     ubadge[0] = '@';
     ui_strcpy(ubadge + 1, sizeof(ubadge) - 1, (cur_u && cur_u[0]) ? cur_u : "myos");
     int ubw = text_width(font_bold(), ubadge);
-    cur_rx -= (ubw + 12);
-    rect_t ucard = { cur_rx, 3, ubw + 10, topbar_h - 6 };
-    draw_round_rect(bb, stride, &ucard, 4, RGB(22, 32, 48), 220);
-    draw_round_outline(bb, stride, &ucard, 4, RGB(45, 65, 95), 1, 230);
-    draw_text_bb(bb, stride, font_bold(), cur_rx + 5, 6, ubadge, RGB(120, 175, 255));
+    cur_rx -= (ubw + 14);
+    rect_t ucard = { cur_rx, bar_y + 3, ubw + 12, bar_h - 6 };
+    draw_round_rect(bb, stride, &ucard, 6, RGB(26, 38, 62), 190);
+    draw_round_outline(bb, stride, &ucard, 6, RGB(90, 145, 225), 1, 170);
+    rect_t u_shine = { cur_rx + 4, bar_y + 4, ubw + 4, 1 };
+    draw_rect_aa(bb, stride, &u_shine, RGB(255, 255, 255), 110);
+    draw_text_bb(bb, stride, font_bold(), cur_rx + 6, bar_y + 8, ubadge, RGB(140, 195, 255));
+
+    /* 3. Notification Bell Icon */
+    cur_rx -= 22;
+    hit_bell_x0 = cur_rx;
+    hit_bell_x1 = cur_rx + 20;
+    int bell_cx = cur_rx + 8, bell_cy = bar_y + 11;
+    color_t bell_col = current_toast.active ? RGB(255, 200, 60) : RGB(180, 200, 230);
+    px(bb, stride, bell_cx, bell_cy - 4, bell_col);
+    for (int dx = -2; dx <= 2; dx++) px(bb, stride, bell_cx + dx, bell_cy - 2, bell_col);
+    for (int dx = -3; dx <= 3; dx++) px(bb, stride, bell_cx + dx, bell_cy, bell_col);
+    for (int dx = -4; dx <= 4; dx++) px(bb, stride, bell_cx + dx, bell_cy + 2, bell_col);
+    px(bb, stride, bell_cx, bell_cy + 4, bell_col);
+    /* Small badge dot if active toast */
+    if (current_toast.active) {
+        rect_t bdot = { bell_cx + 3, bell_cy - 4, 4, 4 };
+        draw_round_rect(bb, stride, &bdot, 2, RGB(255, 75, 95), 255);
+    }
 
     power_state_t pwr;
     power_get_state(&pwr);
     net_state_t net;
     net_get_state(&net);
 
-    /* Digital Clock (HH:MM:SS) */
-    if (last_clock_s == 0) desktop_format_clock(clock_buf, sizeof(clock_buf), true);
-    int cw = text_width(font_mono(), clock_buf);
-    cur_rx -= (cw + 14);
-    hit_clock_x1 = cur_rx + cw + 10;
-    hit_clock_x0 = cur_rx - 4;
-    draw_text_bb(bb, stride, font_mono(), cur_rx, 6, clock_buf, RGB(235, 245, 255));
-
-    /* Battery Icon & Percentage */
+    /* 4. Battery Icon & Percentage */
     char btext[16];
     snprintf(btext, sizeof(btext), "%u%%", pwr.battery_percent);
     int btw = text_width(font_ui(), btext);
     cur_rx -= (btw + 28);
-    hit_batt_x1 = hit_clock_x0;
+    hit_batt_x1 = cur_rx + btw + 26;
     hit_batt_x0 = cur_rx - 4;
 
-    /* Battery Text */
-    draw_text_bb(bb, stride, font_ui(), cur_rx, 6, btext, pwr.is_charging ? RGB(70, 225, 130) : RGB(200, 215, 235));
-
-    /* Battery Graphic Body */
+    draw_text_bb(bb, stride, font_ui(), cur_rx, bar_y + 8, btext, pwr.is_charging ? RGB(70, 225, 130) : RGB(200, 215, 235));
     int bg_x = cur_rx + btw + 4;
-    rect_t batt_body = { bg_x, 8, 18, 10 };
+    rect_t batt_body = { bg_x, bar_y + 9, 18, 10 };
     draw_round_outline(bb, stride, &batt_body, 3, RGB(130, 150, 180), 1, 255);
     int fill_w = (14 * (int)pwr.battery_percent) / 100;
     if (fill_w < 2) fill_w = 2;
-    rect_t batt_fill = { bg_x + 2, 10, fill_w, 6 };
+    rect_t batt_fill = { bg_x + 2, bar_y + 11, fill_w, 6 };
     color_t bcolor = pwr.is_charging ? RGB(46, 220, 110)
                    : (pwr.battery_percent > 35 ? RGB(46, 200, 105) : (pwr.battery_percent > 15 ? RGB(235, 175, 40) : RGB(235, 60, 60)));
     draw_round_rect(bb, stride, &batt_fill, 1, bcolor, 255);
-    rect_t batt_nub = { bg_x + 18, 11, 2, 4 };
+    rect_t batt_nub = { bg_x + 18, bar_y + 12, 2, 4 };
     draw_round_rect(bb, stride, &batt_nub, 1, RGB(130, 150, 180), 255);
-
-    /* If Charging, draw yellow lightning bolt symbol inside/above battery */
     if (pwr.is_charging) {
         color_t bolt_col = RGB(255, 220, 50);
-        px(bb, stride, bg_x + 8, 8, bolt_col);
-        px(bb, stride, bg_x + 7, 9, bolt_col);
-        px(bb, stride, bg_x + 8, 10, bolt_col);
-        px(bb, stride, bg_x + 9, 10, bolt_col);
-        px(bb, stride, bg_x + 10, 10, bolt_col);
-        px(bb, stride, bg_x + 8, 11, bolt_col);
-        px(bb, stride, bg_x + 7, 12, bolt_col);
-        px(bb, stride, bg_x + 8, 13, bolt_col);
+        px(bb, stride, bg_x + 8, bar_y + 9, bolt_col);
+        px(bb, stride, bg_x + 7, bar_y + 10, bolt_col);
+        px(bb, stride, bg_x + 8, bar_y + 11, bolt_col);
+        px(bb, stride, bg_x + 9, bar_y + 11, bolt_col);
+        px(bb, stride, bg_x + 8, bar_y + 12, bolt_col);
+        px(bb, stride, bg_x + 7, bar_y + 13, bolt_col);
     }
 
-    /* Volume Speaker Icon */
+    /* 5. Volume Speaker Icon */
     cur_rx -= 20;
-    int spk_x = cur_rx, spk_y = 7;
-    rect_t spk_box = { spk_x, spk_y + 3, 4, 6 };
+    int spk_x = cur_rx, spk_y = bar_y + 9;
+    rect_t spk_box = { spk_x, spk_y + 2, 4, 6 };
     draw_rect_aa(bb, stride, &spk_box, RGB(210, 225, 245), 255);
-    for (int i = 0; i < 5; i++) {
-        px(bb, stride, spk_x + 4 + i, spk_y + 3 - i, RGB(210, 225, 245));
-        px(bb, stride, spk_x + 4 + i, spk_y + 8 + i, RGB(210, 225, 245));
+    for (int i = 0; i < 4; i++) {
+        px(bb, stride, spk_x + 4 + i, spk_y + 2 - i, RGB(210, 225, 245));
+        px(bb, stride, spk_x + 4 + i, spk_y + 7 + i, RGB(210, 225, 245));
     }
+    px(bb, stride, spk_x + 10, spk_y + 3, RGB(210, 225, 245));
     px(bb, stride, spk_x + 11, spk_y + 4, RGB(210, 225, 245));
-    px(bb, stride, spk_x + 12, spk_y + 5, RGB(210, 225, 245));
-    px(bb, stride, spk_x + 12, spk_y + 6, RGB(210, 225, 245));
-    px(bb, stride, spk_x + 11, spk_y + 7, RGB(210, 225, 245));
+    px(bb, stride, spk_x + 11, spk_y + 5, RGB(210, 225, 245));
+    px(bb, stride, spk_x + 10, spk_y + 6, RGB(210, 225, 245));
 
-    /* Bluetooth Icon */
+    /* 6. Bluetooth Icon */
     cur_rx -= 18;
-    int bt_x = cur_rx + 4, bt_y = 8;
+    int bt_x = cur_rx + 4, bt_y = bar_y + 9;
     color_t bt_col = net.bt_enabled ? RGB(75, 165, 255) : RGB(85, 100, 125);
-    for (int y = 0; y < 11; y++) px(bb, stride, bt_x + 4, bt_y + y, bt_col);
+    for (int y = 0; y < 10; y++) px(bb, stride, bt_x + 4, bt_y + y, bt_col);
     px(bb, stride, bt_x + 5, bt_y + 1, bt_col);
     px(bb, stride, bt_x + 6, bt_y + 2, bt_col);
-    px(bb, stride, bt_x + 7, bt_y + 3, bt_col);
-    px(bb, stride, bt_x + 6, bt_y + 4, bt_col);
-    px(bb, stride, bt_x + 5, bt_y + 5, bt_col);
-    px(bb, stride, bt_x + 6, bt_y + 6, bt_col);
-    px(bb, stride, bt_x + 7, bt_y + 7, bt_col);
-    px(bb, stride, bt_x + 6, bt_y + 8, bt_col);
-    px(bb, stride, bt_x + 5, bt_y + 9, bt_col);
-    px(bb, stride, bt_x + 3, bt_y + 2, bt_col);
-    px(bb, stride, bt_x + 2, bt_y + 1, bt_col);
-    px(bb, stride, bt_x + 3, bt_y + 8, bt_col);
-    px(bb, stride, bt_x + 2, bt_y + 9, bt_col);
+    px(bb, stride, bt_x + 5, bt_y + 3, bt_col);
+    px(bb, stride, bt_x + 5, bt_y + 6, bt_col);
+    px(bb, stride, bt_x + 6, bt_y + 7, bt_col);
+    px(bb, stride, bt_x + 5, bt_y + 8, bt_col);
 
-    /* Wi-Fi Signal Arcs */
+    /* 7. Wi-Fi Signal Arcs */
     cur_rx -= 20;
-    int w_cx = cur_rx + 8, w_cy = 17;
+    int w_cx = cur_rx + 8, w_cy = bar_y + 18;
     color_t wifi_col = (net.wifi_enabled && net.wifi_connected) ? RGB(55, 215, 150) : RGB(85, 100, 125);
     px(bb, stride, w_cx, w_cy, wifi_col);
     for (int dx = -3; dx <= 3; dx++) {
@@ -802,11 +937,11 @@ static void draw_top_bar(uint32_t *bb, int stride) {
         else if (dx >= -4 && dx <= 4) px(bb, stride, w_cx + dx, w_cy - 8, wifi_col);
     }
 
-    /* Ethernet LAN Icon */
+    /* 8. Ethernet LAN Icon */
     cur_rx -= 20;
     hit_net_x1 = bt_x + 12;
     hit_net_x0 = cur_rx - 4;
-    int eth_x = cur_rx + 2, eth_y = 8;
+    int eth_x = cur_rx + 2, eth_y = bar_y + 9;
     color_t eth_col = net.eth_connected ? RGB(50, 215, 130) : RGB(85, 100, 125);
     rect_t eth_box = { eth_x, eth_y, 11, 8 };
     draw_round_outline(bb, stride, &eth_box, 2, eth_col, 1, 255);
@@ -819,8 +954,17 @@ static void draw_top_bar(uint32_t *bb, int stride) {
 
 static void draw_left_nav(uint32_t *bb, int stride) {
     rect_t bar = { lnav_x, lnav_y, lnav_w, lnav_h };
-    draw_round_rect(bb, stride, &bar, 14, RGB(13, 17, 26), 215);
-    draw_round_outline(bb, stride, &bar, 14, RGB(38, 52, 76), 1, 230);
+    /* Soft ambient shadow */
+    rect_t sh = { lnav_x + 2, lnav_y + 4, lnav_w, lnav_h };
+    draw_round_rect(bb, stride, &sh, 14, RGB(0, 0, 0), 100);
+
+    /* Translucent frosted glass body */
+    draw_round_rect(bb, stride, &bar, 14, RGB(18, 25, 42), 165);
+    draw_round_outline(bb, stride, &bar, 14, RGB(180, 215, 255), 1, 95);
+
+    /* Top specular highlight */
+    rect_t top_g = { lnav_x + 8, lnav_y + 2, lnav_w - 16, 1 };
+    draw_rect_aa(bb, stride, &top_g, RGB(255, 255, 255), 130);
 
     /* 6 Nav Slots: Home, Apps, Terminal, Files, Tor Browser, Settings */
     int slot_h = lnav_h / 6;
@@ -831,8 +975,10 @@ static void draw_left_nav(uint32_t *bb, int stride) {
 
         if (lnav_hot == i) {
             rect_t slot_r = { lnav_x + 4, iy + 4, lnav_w - 8, slot_h - 8 };
-            draw_round_rect(bb, stride, &slot_r, 8, RGB(40, 60, 95), 180);
-            draw_round_outline(bb, stride, &slot_r, 8, RGB(80, 130, 205), 1, 200);
+            draw_round_rect(bb, stride, &slot_r, 8, RGB(45, 75, 125), 190);
+            draw_round_outline(bb, stride, &slot_r, 8, RGB(110, 180, 255), 1, 210);
+            rect_t p_shine = { lnav_x + 8, iy + 6, lnav_w - 16, 1 };
+            draw_rect_aa(bb, stride, &p_shine, RGB(255, 255, 255), 120);
         }
 
         switch (i) {
@@ -896,134 +1042,99 @@ static void draw_left_nav(uint32_t *bb, int stride) {
     }
 }
 
-/* ---- Floating Bottom Dock ----------------------------------------------- */
+/* ---- Floating Bottom Dock (Glassmorphism Capsule) ----------------------- */
 
 static void draw_dock(uint32_t *bb, int stride) {
     rect_t dock = { dock_x, dock_y, dock_w, dock_h };
 
-    /* Drop shadow */
-    rect_t sh = { dock_x + 2, dock_y + 4, dock_w, dock_h };
-    draw_round_rect(bb, stride, &sh, 24, RGB(0, 0, 0), 140);
+    /* Multi-tier soft ambient glass drop shadow */
+    rect_t sh1 = { dock_x + 1, dock_y + 4, dock_w, dock_h };
+    draw_round_rect(bb, stride, &sh1, 24, RGB(0, 0, 0), 115);
+    rect_t sh2 = { dock_x + 3, dock_y + 7, dock_w - 4, dock_h - 2 };
+    draw_round_rect(bb, stride, &sh2, 22, RGB(0, 0, 0), 75);
 
-    /* Glassmorphic body with specular refraction line */
-    draw_round_rect(bb, stride, &dock, 24, RGB(14, 18, 28), 235);
-    draw_round_outline(bb, stride, &dock, 24, RGB(50, 75, 115), 1, 230);
-    rect_t spec = { dock_x + 24, dock_y + 1, dock_w - 48, 1 };
-    draw_rect_aa(bb, stride, &spec, RGB(130, 180, 255), 70);
+    /* Translucent frosted glass body (lets the luminous wallpaper shine through!) */
+    draw_round_rect(bb, stride, &dock, 24, RGB(20, 28, 48), 160);
+    draw_round_outline(bb, stride, &dock, 24, RGB(180, 215, 255), 1, 105);
+
+    /* Top specular reflection strip (signature physical glass bevel reflection) */
+    rect_t shine = { dock_x + 18, dock_y + 2, dock_w - 36, 1 };
+    draw_rect_aa(bb, stride, &shine, RGB(255, 255, 255), 140);
+    rect_t sub_shine = { dock_x + 22, dock_y + 3, dock_w - 44, 1 };
+    draw_rect_aa(bb, stride, &sub_shine, RGB(180, 220, 255), 80);
 
     int slot_w = dock_w / 7;
     for (int i = 0; i < 7; i++) {
         int cx = dock_x + slot_w / 2 + i * slot_w;
         int cy = dock_y + dock_h / 2;
 
-        /* Hover indicator pill */
+        /* If hovered, draw glowing frosted glass pill pedestal! */
         if (dock_hot == i) {
-            rect_t hov = { cx - 20, cy - 20, 40, 40 };
-            draw_round_rect(bb, stride, &hov, 12, RGB(255, 255, 255), 35);
-            draw_round_outline(bb, stride, &hov, 12, RGB(90, 150, 240), 1, 160);
+            rect_t pill = { cx - 22, dock_y + 5, 44, dock_h - 10 };
+            draw_round_rect(bb, stride, &pill, 12, RGB(55, 95, 160), 170);
+            draw_round_outline(bb, stride, &pill, 12, RGB(140, 205, 255), 1, 210);
+            /* Specular glint on pill */
+            rect_t p_shine = { cx - 14, dock_y + 7, 28, 1 };
+            draw_rect_aa(bb, stride, &p_shine, RGB(255, 255, 255), 130);
         }
 
         switch (i) {
-            case 0: { /* Start Button: Signature Orbital 'M' 3D Logo */
-                logo_draw_buffer(bb, stride, scr_w, scr_h, cx, cy - 1, 26);
-                if (menu_open) {
-                    rect_t ring = { cx - 18, cy - 19, 36, 36 };
-                    draw_round_outline(bb, stride, &ring, 18, RGB(80, 175, 255), 2, 230);
-                }
+            case 0: { /* Start Button */
+                logo_draw_buffer(bb, stride, scr_w, scr_h, cx, cy - 1, 24);
                 break;
             }
             case 1: { /* File Manager */
-                rect_t fld = { cx - 12, cy - 9, 24, 17 };
+                rect_t fld = { cx - 10, cy - 7, 20, 15 };
                 draw_round_rect(bb, stride, &fld, 3, RGB(43, 126, 245), 255);
-                rect_t tab = { cx - 12, cy - 13, 11, 5 };
-                draw_round_rect(bb, stride, &tab, 2, RGB(43, 126, 245), 255);
-                rect_t front = { cx - 10, cy - 6, 20, 12 };
-                draw_round_rect(bb, stride, &front, 2, RGB(70, 155, 255), 230);
-                if (app_is_running("Files")) {
-                    rect_t ind = { cx - 2, dock_y + dock_h - 5, 4, 3 };
-                    draw_round_rect(bb, stride, &ind, 1, RGB(70, 170, 255), 255);
-                }
                 break;
             }
             case 2: { /* Terminal */
-                rect_t tbox = { cx - 12, cy - 10, 24, 19 };
+                rect_t tbox = { cx - 10, cy - 9, 20, 17 };
                 draw_round_rect(bb, stride, &tbox, 4, RGB(22, 28, 38), 255);
-                draw_round_outline(bb, stride, &tbox, 4, RGB(60, 75, 100), 1, 255);
-                for (int d = 0; d <= 4; d++) {
-                    px(bb, stride, cx - 8 + d, cy - 5 + d, RGB(55, 215, 115));
-                    px(bb, stride, cx - 4 - d, cy - 1 + d, RGB(55, 215, 115));
-                }
-                for (int d = 0; d < 6; d++) px(bb, stride, cx - 1 + d, cy + 3, RGB(85, 165, 255));
-                if (app_is_running("Terminal")) {
-                    rect_t ind = { cx - 2, dock_y + dock_h - 5, 4, 3 };
-                    draw_round_rect(bb, stride, &ind, 1, RGB(55, 215, 115), 255);
-                }
                 break;
             }
             case 3: { /* Tor Browser */
-                rect_t gbody = { cx - 12, cy - 12, 24, 24 };
-                draw_round_rect(bb, stride, &gbody, 12, RGB(26, 138, 204), 255);
-                draw_round_outline(bb, stride, &gbody, 12, RGB(75, 195, 255), 1, 255);
-                for (int d = -8; d <= 8; d++) {
-                    px(bb, stride, cx + d, cy, RGB(200, 240, 255));
-                    px(bb, stride, cx, cy + d, RGB(200, 240, 255));
-                }
-                rect_t onion = { cx - 4, cy - 4, 8, 8 };
-                draw_round_rect(bb, stride, &onion, 4, RGB(189, 83, 237), 255);
-                if (app_is_running("Browser") || app_is_running("Tor")) {
-                    rect_t ind = { cx - 2, dock_y + dock_h - 5, 4, 3 };
-                    draw_round_rect(bb, stride, &ind, 1, RGB(189, 83, 237), 255);
-                }
+                rect_t gbody = { cx - 10, cy - 10, 20, 20 };
+                draw_round_rect(bb, stride, &gbody, 8, RGB(26, 138, 204), 255);
                 break;
             }
             case 4: { /* Settings / System */
-                rect_t sbox = { cx - 12, cy - 11, 24, 21 };
+                rect_t sbox = { cx - 10, cy - 10, 20, 19 };
                 draw_round_rect(bb, stride, &sbox, 4, RGB(35, 44, 60), 255);
-                draw_round_outline(bb, stride, &sbox, 4, RGB(70, 90, 120), 1, 255);
-                for (int d = -6; d <= -2; d++) px(bb, stride, cx + d, cy + 2, RGB(46, 200, 105));
-                for (int d = 0; d <= 4; d++) px(bb, stride, cx - 2 + d / 2, cy - d, RGB(46, 200, 105));
-                for (int d = 0; d <= 7; d++) px(bb, stride, cx + d / 2, cy - 4 + d, RGB(46, 200, 105));
-                for (int d = 4; d <= 7; d++) px(bb, stride, cx + d, cy + 2, RGB(46, 200, 105));
-                if (app_is_running("System")) {
-                    rect_t ind = { cx - 2, dock_y + dock_h - 5, 4, 3 };
-                    draw_round_rect(bb, stride, &ind, 1, RGB(46, 200, 105), 255);
-                }
                 break;
             }
             case 5: { /* Gallery / Photos */
-                rect_t pframe = { cx - 12, cy - 10, 24, 19 };
+                rect_t pframe = { cx - 10, cy - 9, 20, 17 };
                 draw_round_rect(bb, stride, &pframe, 3, RGB(220, 230, 245), 255);
-                rect_t pinner = { cx - 10, cy - 8, 20, 15 };
-                draw_round_rect(bb, stride, &pinner, 2, RGB(40, 80, 150), 255);
-                for (int d = 0; d <= 5; d++) {
-                    px(bb, stride, cx - 5 + d, cy + 5 - d, RGB(230, 160, 60));
-                    px(bb, stride, cx + d, cy + 5 - d, RGB(245, 190, 80));
-                }
-                rect_t sun = { cx + 4, cy - 5, 4, 4 };
-                draw_round_rect(bb, stride, &sun, 2, RGB(255, 230, 100), 255);
-                if (app_is_running("About")) {
-                    rect_t ind = { cx - 2, dock_y + dock_h - 5, 4, 3 };
-                    draw_round_rect(bb, stride, &ind, 1, RGB(245, 190, 80), 255);
-                }
                 break;
             }
             case 6: { /* Trash */
-                rect_t tcan = { cx - 8, cy - 6, 16, 16 };
+                rect_t tcan = { cx - 6, cy - 5, 12, 12 };
                 draw_round_rect(bb, stride, &tcan, 2, RGB(140, 155, 175), 255);
-                rect_t tlid = { cx - 10, cy - 9, 20, 3 };
-                draw_round_rect(bb, stride, &tlid, 1, RGB(180, 195, 215), 255);
-                rect_t thand = { cx - 3, cy - 11, 6, 2 };
-                draw_round_rect(bb, stride, &thand, 1, RGB(180, 195, 215), 255);
-                for (int l = -4; l <= 4; l += 4) {
-                    for (int dy = -3; dy <= 5; dy++) px(bb, stride, cx + l, cy + dy, RGB(80, 95, 115));
-                }
                 break;
             }
+        }
+
+        /* Running Application Indicator Dot (Glassmorphism Neon Cyan/Azure Pill) */
+        bool is_running = false;
+        if (i == 0 && menu_open) is_running = true;
+        else if (i == 1 && wm_find("Files — Storage & Package Manager")) is_running = true;
+        else if (i == 2 && wm_find("Terminal")) is_running = true;
+        else if (i == 3 && wm_find("Tor Browser")) is_running = true;
+        else if (i == 4 && (wm_find("Settings") || wm_find("System Monitor"))) is_running = true;
+        else if (i == 5 && wm_find("Music")) is_running = true;
+
+        if (is_running) {
+            rect_t dot = { cx - 3, dock_y + dock_h - 6, 6, 3 };
+            draw_round_rect(bb, stride, &dot, 1, RGB(101, 217, 255), 240);
+            /* Subtle neon glow */
+            px(bb, stride, cx - 4, dock_y + dock_h - 5, RGB(139, 157, 255));
+            px(bb, stride, cx + 3, dock_y + dock_h - 5, RGB(139, 157, 255));
         }
     }
 }
 
-/* ---- Start Menu Flyout -------------------------------------------------- */
+/* ---- Start Menu Flyout (Frosted Glass Card) ----------------------------- */
 
 static void draw_menu(uint32_t *bb, int stride) {
     if (!menu_open) return;
@@ -1032,62 +1143,80 @@ static void draw_menu(uint32_t *bb, int stride) {
     int my = dock_y - mh - 12;
     rect_t card = { mx, my, mw, mh };
 
-    /* Drop shadow */
-    rect_t sh = { mx + 3, my + 6, mw, mh };
-    draw_round_rect(bb, stride, &sh, 16, RGB(0, 0, 0), 150);
-    draw_round_rect(bb, stride, &card, 16, RGB(15, 20, 30), 248);
-    draw_round_outline(bb, stride, &card, 16, RGB(55, 80, 125), 1, 255);
+    /* Ambient glass drop shadow */
+    rect_t sh1 = { mx + 2, my + 6, mw, mh };
+    draw_round_rect(bb, stride, &sh1, 18, RGB(0, 0, 0), 130);
+    rect_t sh2 = { mx + 5, my + 10, mw - 6, mh - 4 };
+    draw_round_rect(bb, stride, &sh2, 16, RGB(0, 0, 0), 80);
 
-    /* Search Bar */
+    /* Translucent frosted glass card */
+    draw_round_rect(bb, stride, &card, 16, RGB(18, 25, 42), 185);
+    draw_round_outline(bb, stride, &card, 16, RGB(180, 215, 255), 1, 105);
+
+    /* Top specular glass sheen */
+    rect_t shine = { mx + 16, my + 1, mw - 32, 1 };
+    draw_rect_aa(bb, stride, &shine, RGB(255, 255, 255), 140);
+
+    /* Frosted glass search bar with inset sheen */
     rect_t sbar = { mx + 14, my + 14, mw - 28, 34 };
-    draw_round_rect(bb, stride, &sbar, 8, RGB(24, 32, 46), 255);
-    draw_round_outline(bb, stride, &sbar, 8, RGB(48, 66, 96), 1, 230);
-    draw_text_bb(bb, stride, font_ui(), mx + 26, my + 23, "Search apps & storage...", RGB(120, 145, 180));
+    draw_round_rect(bb, stride, &sbar, 8, RGB(14, 20, 34), 210);
+    draw_round_outline(bb, stride, &sbar, 8, RGB(65, 95, 145), 1, 210);
+    rect_t sb_shine = { mx + 20, my + 16, mw - 40, 1 };
+    draw_rect_aa(bb, stride, &sb_shine, RGB(255, 255, 255), 60);
+    draw_text_bb(bb, stride, font_ui(), mx + 26, my + 23, "Search apps & storage...", RGB(140, 170, 210));
 
     /* App Items List */
     for (int i = 0; i < APP_COUNT; i++) {
         int iy = my + 58 + i * 46;
         rect_t row = { mx + 10, iy, mw - 20, 42 };
         if (menu_hot == i) {
-            draw_round_rect(bb, stride, &row, 8, TH_ACCENT_SOFT, 255);
-            draw_round_outline(bb, stride, &row, 8, TH_BORDER_FOCUS, 1, 220);
+            draw_round_rect(bb, stride, &row, 8, RGB(42, 66, 108), 190);
+            draw_round_outline(bb, stride, &row, 8, RGB(110, 175, 255), 1, 210);
+            rect_t r_shine = { mx + 16, iy + 2, mw - 32, 1 };
+            draw_rect_aa(bb, stride, &r_shine, RGB(255, 255, 255), 100);
         }
         draw_app_tile(bb, stride, mx + 18, iy + 5, 32, i);
-        draw_text_bb(bb, stride, font_bold(), mx + 60, iy + 6, apps[i].name, TH_TEXT_BRIGHT);
+        draw_text_bb(bb, stride, font_bold(), mx + 60, iy + 6, apps[i].name, TH_TEXT_PRIMARY);
         draw_text_bb(bb, stride, font_ui(), mx + 60, iy + 22, apps[i].desc, TH_TEXT_DIM);
     }
 
-    /* Footer: User profile & Lock button */
+    /* Footer: User profile & Lock button in frosted glass card */
     rect_t footer = { mx + 10, my + mh - 44, mw - 20, 36 };
-    draw_round_rect(bb, stride, &footer, 8, RGB(22, 28, 40), 220);
-    draw_round_outline(bb, stride, &footer, 8, RGB(42, 54, 76), 1, 200);
+    draw_round_rect(bb, stride, &footer, 8, RGB(24, 34, 54), 200);
+    draw_round_outline(bb, stride, &footer, 8, RGB(60, 85, 130), 1, 180);
+    rect_t f_shine = { mx + 14, my + mh - 42, mw - 28, 1 };
+    draw_rect_aa(bb, stride, &f_shine, RGB(255, 255, 255), 80);
 
     const char *cur_u = auth_get_current_user();
     char ubadge[AUTH_NAME_MAX + 2];
     ubadge[0] = '@';
     ui_strcpy(ubadge + 1, sizeof(ubadge) - 1, (cur_u && cur_u[0]) ? cur_u : "myos");
-    draw_text_bb(bb, stride, font_bold(), mx + 20, my + mh - 32, ubadge, RGB(120, 175, 255));
+    draw_text_bb(bb, stride, font_bold(), mx + 20, my + mh - 32, ubadge, RGB(130, 190, 255));
 
     rect_t lock_btn = { mx + mw - 76, my + mh - 40, 58, 28 };
-    draw_round_rect(bb, stride, &lock_btn, 6, RGB(35, 48, 70), 255);
-    draw_round_outline(bb, stride, &lock_btn, 6, RGB(65, 90, 130), 1, 220);
-    draw_text_bb(bb, stride, font_ui(), mx + mw - 62, my + mh - 33, "Lock", RGB(220, 235, 255));
+    draw_round_rect(bb, stride, &lock_btn, 6, RGB(38, 56, 88), 240);
+    draw_round_outline(bb, stride, &lock_btn, 6, RGB(90, 135, 205), 1, 210);
+    rect_t lb_shine = { mx + mw - 72, my + mh - 38, 50, 1 };
+    draw_rect_aa(bb, stride, &lb_shine, RGB(255, 255, 255), 120);
+    draw_text_bb(bb, stride, font_ui(), mx + mw - 62, my + mh - 33, "Lock", RGB(230, 242, 255));
 }
 
-/* ---- Desktop shortcuts -------------------------------------------------- */
+/* ---- Desktop shortcuts (Frosted Glass Plates) --------------------------- */
 
 static void draw_desktop_icons(uint32_t *bb, int stride) {
     for (int i = 0; i < icon_count; i++) {
         icon_slot_t *s = &icons[i];
         rect_t plate = { s->x, s->y, 88, 86 };
         if (s->hot) {
-            draw_round_rect(bb, stride, &plate, 10, TH_ACCENT_SOFT, 160);
-            draw_round_outline(bb, stride, &plate, 10, TH_BORDER_FOCUS, 1, 200);
+            draw_round_rect(bb, stride, &plate, 12, RGB(40, 65, 110), 170);
+            draw_round_outline(bb, stride, &plate, 12, RGB(120, 185, 255), 1, 200);
+            rect_t p_shine = { s->x + 10, s->y + 2, 68, 1 };
+            draw_rect_aa(bb, stride, &p_shine, RGB(255, 255, 255), 120);
         }
         draw_app_tile(bb, stride, s->x + 24, s->y + 6, 40, i);
         const char *nm = s->app->name;
         int tw = text_width(font_bold(), nm);
-        draw_text_bb(bb, stride, font_bold(), s->x + (88 - tw) / 2, s->y + 50, nm, TH_TEXT_BRIGHT);
+        draw_text_bb(bb, stride, font_bold(), s->x + (88 - tw) / 2, s->y + 50, nm, TH_TEXT_PRIMARY);
         int dw = text_width(font_ui(), s->app->desc);
         if (dw < 88)
             draw_text_bb(bb, stride, font_ui(), s->x + (88 - dw) / 2, s->y + 66,
@@ -1190,10 +1319,31 @@ static bool desktop_click(int x, int y) {
         return true;
     }
 
-    /* Top bar clicks */
-    if (y < topbar_h) {
+    /* Floating Top panel clicks */
+    if (y < topbar_h + 10) {
+        /* Launcher button click toggles start menu flyout */
+        if (x >= hit_launcher_x0 && x < hit_launcher_x1) {
+            menu_open = !menu_open;
+            if (menu_open && menu_hot < 0) menu_hot = 0;
+            return true;
+        }
+        /* Lock / Power button click locks screen */
+        if (x >= hit_lock_x0 && x < hit_lock_x1) {
+            login_lock();
+            return true;
+        }
+        /* Notification bell click */
+        if (x >= hit_bell_x0 && x < hit_bell_x1) {
+            if (current_toast.active) {
+                current_toast.active = false;
+                fb_add_damage(scr_w - 320, 40, 310, 80);
+            } else {
+                desktop_show_notification("MyOS Notification", "System running optimally with Glassmorphism UI", RGB(101, 217, 255));
+            }
+            return true;
+        }
         /* User profile click locks screen */
-        if (x >= scr_w - 70) {
+        if (x >= scr_w - 110 && x < hit_lock_x0) {
             login_lock();
             return true;
         }
@@ -1212,7 +1362,8 @@ static bool desktop_click(int x, int y) {
             app_open_network();
             return true;
         }
-        return true;
+        /* Click on top bar but not on any special element: let WM handle it */
+        return false;
     }
 
     /* Left navigation bar clicks */
@@ -1271,20 +1422,29 @@ static void desktop_hover(int x, int y) {
 
 void desktop_tick(void) {
     input_pump();
-
     /* If system is locked, route all interaction to the login screen */
     if (login_is_locked()) {
+        bool need = !wallpaper_done;
         gui_event_t ev;
         while (input_poll(&ev)) {
             login_handle_event(&ev);
+            need = true;
         }
 
         /* If event unlocked the screen, force a full refresh on next tick */
         if (!login_is_locked()) {
             wallpaper_done = false;
+            lock_force_full = true;
             fb_flush_all();
             return;
         }
+
+        /* The login caret blinks at 2 Hz, so an otherwise idle lock screen only
+         * needs a handful of repaints per second, not one every frame. */
+        static uint32_t last_login_ms;
+        uint32_t now_ms = timer_get_ms();
+        if (now_ms - last_login_ms >= 250) { last_login_ms = now_ms; need = true; }
+        if (!need) return;
 
         uint32_t *bb = fb_get_backbuffer();
         if (!bb) return;
@@ -1292,14 +1452,17 @@ void desktop_tick(void) {
 
         if (!wallpaper_done) draw_wallpaper();
         blit_wallpaper(bb, stride);
-
         login_render(bb, stride, scr_w, scr_h);
         cursor_draw();
 
-        fb_add_damage(0, 0, scr_w, scr_h);
-        static int login_frame = 0;
-        if (login_frame++ < 3) {
+        /* login_render records its own damage: the whole screen only when the
+         * cached backdrop is rebuilt, otherwise just the card interior and the
+         * cursor's own region. On (re)entering the lock screen we must push a
+         * full frame, otherwise the previous desktop chrome stays visible
+         * around the login card. */
+        if (lock_force_full) {
             fb_flush_all();
+            lock_force_full = false;
         } else {
             fb_flush();
         }
@@ -1385,7 +1548,7 @@ void desktop_tick(void) {
     if (secs != last_clock_s) {
         last_clock_s = secs;
         desktop_format_clock(clock_buf, sizeof(clock_buf), true);
-        fb_add_damage(scr_w - 240, 0, 240, topbar_h);
+        fb_add_damage(0, 0, scr_w, topbar_h + 20);
     }
 
     uint32_t *bb = fb_get_backbuffer();
@@ -1394,8 +1557,10 @@ void desktop_tick(void) {
 
     cursor_erase();
 
-    if (!wallpaper_done) draw_wallpaper();
+    bool wp_redraw = !wallpaper_done;
+    if (wp_redraw) draw_wallpaper();
     blit_wallpaper(bb, stride);
+    if (wp_redraw) fb_add_damage(0, 0, scr_w, scr_h);
 
     wm_compose();
 
@@ -1407,6 +1572,7 @@ void desktop_tick(void) {
     draw_left_nav(bb, stride);
     draw_dock(bb, stride);
     draw_menu(bb, stride);
+    draw_notifications(bb, stride);
 
     /* Track component hover damages */
     static int prev_dock_hot = -1;
@@ -1415,21 +1581,34 @@ void desktop_tick(void) {
     static bool prev_menu_open = false;
 
     if (dock_hot != prev_dock_hot) {
-        fb_add_damage(dock_x - 10, dock_y - 10, dock_w + 20, dock_h + 20);
+        int dx = dock_x - 10; if (dx < 0) dx = 0;
+        int dy = dock_y - 10; if (dy < 0) dy = 0;
+        fb_add_damage(dx, dy, dock_w + 20, dock_h + 20);
         prev_dock_hot = dock_hot;
     }
     if (lnav_hot != prev_lnav_hot) {
-        fb_add_damage(lnav_x - 10, lnav_y - 10, lnav_w + 20, lnav_h + 20);
+        int lx = lnav_x - 10; if (lx < 0) lx = 0;
+        int ly = lnav_y - 10; if (ly < 0) ly = 0;
+        fb_add_damage(lx, ly, lnav_w + 20, lnav_h + 20);
         prev_lnav_hot = lnav_hot;
     }
     if (menu_hot != prev_menu_hot || menu_open != prev_menu_open) {
-        fb_add_damage(8, scr_h - 350 - 64, 280, 350);
+        int mmw = 310, mmh = 380;
+        int mmx = (scr_w - mmw) / 2;
+        int mmy = dock_y - mmh - 12;
+        int dmx = mmx - 6; if (dmx < 0) dmx = 0;
+        int dmy = mmy - 6; if (dmy < 0) dmy = 0;
+        fb_add_damage(dmx, dmy, mmw + 16, mmh + 20);
+        fb_add_damage(0, 0, scr_w, topbar_h + 20);
         prev_menu_hot = menu_hot;
         prev_menu_open = menu_open;
     }
-
-    if (wm_capture_active()) {
-        fb_add_damage(0, 0, scr_w, scr_h);
+    static bool prev_icon_hot[APP_COUNT] = {false};
+    for (int i = 0; i < icon_count && i < APP_COUNT; i++) {
+        if (icons[i].hot != prev_icon_hot[i]) {
+            fb_add_damage(icons[i].x, icons[i].y, 88, 86);
+            prev_icon_hot[i] = icons[i].hot;
+        }
     }
 
     /* Standby Mode display veil */
@@ -1460,13 +1639,17 @@ void desktop_tick(void) {
 void desktop_run(void) {
     uint32_t last_frame_ticks = timer_get_ticks();
     for (;;) {
+        input_pump();
         uint32_t now = timer_get_ticks();
-        if (now - last_frame_ticks >= 16) {
+        uint32_t elapsed = now - last_frame_ticks;
+        if (elapsed >= 16) {
             last_frame_ticks = now;
             desktop_tick();
         } else {
-            input_pump();
+            /* Block until the next frame boundary instead of busy-yielding.
+             * Busy-yielding re-entered the scheduler thousands of times a
+             * second, flushing the TLB (CR3 reload) and starving other work. */
+            process_sleep(16 - elapsed);
         }
-        process_yield();
     }
 }

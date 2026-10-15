@@ -41,5 +41,6 @@ const app_entry_t *desktop_app_at(int i);
 /* The clock, exposed for the taskbar and for apps that want a timestamp. */
 void desktop_format_clock(char *buf, int len, bool with_seconds);
 void desktop_set_theme(const char *name);
+void desktop_show_notification(const char *title, const char *msg, color_t accent);
 
 #endif

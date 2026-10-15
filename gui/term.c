@@ -51,7 +51,7 @@ static void term_paint(wm_window_t *w, surface_t *s, const rect_t *client) {
             color_t fg = cell->fg == VGA_BRIGHT_BLACK ? TH_TEXT_DIM
                                                       : vga_color_rgb(cell->fg, true);
             if (cell->attr & VTTY_ATTR_DIM) fg = TH_TEXT_DIM;
-            if (cell->attr & VTTY_ATTR_BOLD) fg = TH_TEXT_BRIGHT;
+            if (cell->attr & VTTY_ATTR_BOLD) fg = TH_TEXT_PRIMARY;
             if (cursor_here) {
                 rect_t bgc = { px, py, cw, ch };
                 surface_fill_rect(s, &bgc, TH_TERM_CURSOR);
@@ -73,7 +73,7 @@ static void term_paint(wm_window_t *w, surface_t *s, const rect_t *client) {
     /* A scroll position indicator when the view is not at the live bottom. */
     if (t->scroll_top > 0) {
         rect_t bar = { client->x + client->w - 6, client->y + 4, 3, client->h - 8 };
-        surface_rounded_fill(s, &bar, 2, TH_ACCENT_SOFT);
+        surface_rounded_fill(s, &bar, 2, TH_GLASS_SECONDARY);
     }
 }
 

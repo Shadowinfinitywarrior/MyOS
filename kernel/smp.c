@@ -4,9 +4,13 @@
 #include "pmm.h"
 #include "paging.h"
 #include "timer.h"
+#include "security.h"
+#include "scheduler.h"
+#include "isr.h"
 #include "../include/system.h"
 #include "../lib/string.h"
 #include "../lib/printf.h"
+
 #pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
 #pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
 
@@ -20,6 +24,11 @@
 #define OFF_ENTRY       0x48
 #define OFF_READY_FLAG  0x4C
 
+#define MSR_GS_BASE        0xC0000101
+#define MSR_KERNEL_GS_BASE 0xC0000102
+
+per_cpu_data_t per_cpu_data[MAX_CPUS];
+
 static cpu_info_t cpus[MAX_CPUS];
 static int cpu_count = 0;
 static volatile uint32_t ap_ready = 0;
@@ -28,23 +37,87 @@ static uint8_t ap_stacks[MAX_CPUS][AP_STACK_SIZE] ALIGNED(16);
 extern uint8_t TRAMPOLINE_START[];
 extern uint8_t TRAMPOLINE_END[];
 
+static void write_msr(uint32_t msr, uint64_t val) {
+    __asm__ __volatile__("wrmsr" : : "a"((uint32_t)val), "d"((uint32_t)(val >> 32)), "c"(msr));
+}
+
+void ipi_reschedule(uint32_t target_cpu) {
+    if (target_cpu >= MAX_CPUS) return;
+    if (target_cpu == THIS_CPU()->cpu_id) {
+        scheduler_schedule();
+        return;
+    }
+    apic_send_ipi((uint8_t)per_cpu_data[target_cpu].apic_id, IPI_VECTOR_RESCHEDULE);
+}
+
+void ipi_reschedule_handler(registers_t *regs) {
+    (void)regs;
+    apic_eoi();
+    scheduler_schedule();
+}
+
 void ap_main(uint32_t apic_id) {
-    kprintf("[SMP] AP %u (APIC ID %u) is alive!\n", cpu_count, apic_id);
+    uint32_t cpu_id = 0;
+    for (int i = 0; i < MAX_CPUS; i++) {
+        if (per_cpu_data[i].apic_id == apic_id) {
+            cpu_id = i;
+            break;
+        }
+    }
+
+    /* Set up GS base for per-CPU data */
+    write_msr(MSR_GS_BASE, (uint64_t)&per_cpu_data[cpu_id]);
+    write_msr(MSR_KERNEL_GS_BASE, 0);
+
+    /* Enable APIC and security on this AP */
+    apic_init();
+    cpu_enable_security();
+
+    /* Flush TLB */
+    __asm__ volatile("movq %cr3, %rax\n\tmovq %rax, %cr3");
+
+    kprintf("[SMP] CPU %d (APIC %d) online and entering scheduler\n", cpu_id, apic_id);
+
     sti();
-    while (1) { hlt(); }
+    scheduler_schedule();
+
+    while (1) {
+        hlt();
+    }
 }
 
 void smp_init(void) {
     memset(cpus, 0, sizeof(cpus));
-    cpus[0].apic_id = apic_get_id();
+    memset(per_cpu_data, 0, sizeof(per_cpu_data));
+
+    uint8_t bsp_apic_id = apic_get_id();
+    cpus[0].apic_id = bsp_apic_id;
     cpus[0].is_bsp = true;
     cpus[0].active = true;
     cpu_count = 1;
 
+    per_cpu_data[0].self = &per_cpu_data[0];
+    per_cpu_data[0].cpu_id = 0;
+    per_cpu_data[0].apic_id = bsp_apic_id;
+    spinlock_init(&per_cpu_data[0].rq.lock);
+
+    /* Load BSP GS base */
+    write_msr(MSR_GS_BASE, (uint64_t)&per_cpu_data[0]);
+    write_msr(MSR_KERNEL_GS_BASE, 0);
+
+    /* Register IPI reschedule handler */
+    isr_register_handler(IPI_VECTOR_RESCHEDULE, ipi_reschedule_handler);
+
     int acpi_cpus = acpi_get_num_cpus();
     kprintf("[SMP] ACPI reports %d CPU(s)\n", acpi_cpus);
-    if (acpi_cpus <= 1) { kprintf("[SMP] Uniprocessor system\n"); return; }
-    if (!apic_detect()) { kprintf("[SMP] No APIC\n"); return; }
+    if (acpi_cpus <= 1) {
+        kprintf("[SMP] Uniprocessor mode active\n");
+        return;
+    }
+    if (!apic_detect()) {
+        kprintf("[SMP] No APIC available\n");
+        return;
+    }
 
     uint32_t tramp_size = (uint32_t)(TRAMPOLINE_END - TRAMPOLINE_START);
     if (tramp_size > TRAMPOLINE_SIZE) tramp_size = TRAMPOLINE_SIZE;
@@ -52,7 +125,10 @@ void smp_init(void) {
     paging_map(TRAMPOLINE_PHYS, TRAMPOLINE_PHYS, PAGE_PRESENT | PAGE_WRITE);
 
     acpi_madt_t *madt = (acpi_madt_t *)acpi_find_table("APIC");
-    if (!madt) { kprintf("[SMP] No MADT\n"); return; }
+    if (!madt) {
+        kprintf("[SMP] No MADT found\n");
+        return;
+    }
 
     uint8_t *ptr = madt->entries;
     uint8_t *end = (uint8_t *)madt + madt->header.length;
@@ -64,11 +140,17 @@ void smp_init(void) {
         if (type == MADT_LOCAL_APIC) {
             madt_local_apic_t *lapic = (madt_local_apic_t *)ptr;
             if ((lapic->flags & 1) && lapic->apic_id != cpus[0].apic_id) {
+                per_cpu_data[ap_index].self = &per_cpu_data[ap_index];
+                per_cpu_data[ap_index].cpu_id = ap_index;
+                per_cpu_data[ap_index].apic_id = lapic->apic_id;
+                spinlock_init(&per_cpu_data[ap_index].rq.lock);
+
                 uint8_t *tramp = (uint8_t *)TRAMPOLINE_PHYS;
                 uint32_t stack_top = (uint32_t)&ap_stacks[ap_index][AP_STACK_SIZE];
                 *(uint32_t *)(tramp + OFF_STACK_PTR) = stack_top;
                 *(uint32_t *)(tramp + OFF_CR3) = read_cr3();
-                uint16_t idt_ptr[3]; __asm__ __volatile__("sidt (%0)" : : "r"(idt_ptr));
+                uint16_t idt_ptr[3];
+                __asm__ __volatile__("sidt (%0)" : : "r"(idt_ptr));
                 memcpy(tramp + OFF_IDT_PTR, idt_ptr, 6);
                 *(uint32_t *)(tramp + OFF_ENTRY) = (uint32_t)ap_main;
                 ap_ready = 0;
@@ -83,23 +165,26 @@ void smp_init(void) {
                 timer_sleep(1);
 
                 int timeout = 1000;
-                while (!ap_ready && timeout > 0) { timer_sleep(1); timeout--; }
+                while (!ap_ready && timeout > 0) {
+                    timer_sleep(1);
+                    timeout--;
+                }
 
                 if (ap_ready) {
                     cpus[ap_index].apic_id = lapic->apic_id;
                     cpus[ap_index].active = true;
                     cpus[ap_index].is_bsp = false;
                     cpu_count++;
-                    kprintf("[SMP] AP %u started\n", lapic->apic_id);
+                    kprintf("[SMP] AP %u started successfully\n", lapic->apic_id);
                 } else {
-                    kprintf("[SMP] AP %u failed\n", lapic->apic_id);
+                    kprintf("[SMP] AP %u startup timed out\n", lapic->apic_id);
                 }
                 ap_index++;
             }
         }
         ptr += length;
     }
-    kprintf("[SMP] Total active CPUs: %d\n", cpu_count);
+    kprintf("[SMP] Total online CPUs: %d\n", cpu_count);
 }
 
 int smp_get_cpu_count(void) { return cpu_count; }

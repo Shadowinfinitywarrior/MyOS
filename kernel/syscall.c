@@ -24,6 +24,9 @@
 #include "../drivers/pci.h"
 #include "storage.h"
 #include "power_net.h"
+#include "../net/socket.h"
+#include "pkg.h"
+#include "../fs/novafs.h"
 
 extern char keyboard_getchar(void);
 
@@ -134,12 +137,13 @@ static int32_t sys_read(uint64_t fd, uint64_t buf_ptr, uint64_t count,
             uint32_t got = 0;
             while (got < n) {
                 char c;
-                if (!v || !vtty_pop_char(v, &c)) {
-                    /* No input yet: let other processes run rather than
-                     * spinning the scheduler in a tight loop. */
-                    process_yield();
+                if (!v) {
+                    /* No terminal bound: nothing can ever arrive, so yield
+                     * rather than spin. */
+                    process_sleep(1);
                     continue;
                 }
+                c = vtty_read_blocking(v);
 
                 /* Canonical mode: convert carriage return to newline */
                 if (c == '\r') {
@@ -324,7 +328,7 @@ static int32_t sys_getchar(uint64_t a1, uint64_t a2, uint64_t a3,
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a6; (void)a6; (void)a6;
     char c = 0;
     while ((c = keyboard_getchar()) == 0) {
-        process_yield();
+        process_sleep(1);
     }
     return c;
 }
@@ -1132,9 +1136,141 @@ static int32_t sys_os_control(uint64_t cmd, uint64_t a1, uint64_t a2, uint64_t a
             }
             return (long)((dt.hour << 16) | (dt.minute << 8) | dt.second);
         }
+        case OS_CMD_PKG_INSTALL: {
+            char name[64];
+            if (copy_str_from_user(name, sizeof(name), (const char *)(uintptr_t)a1) != 0) return -1;
+            return pkg_install(name);
+        }
+        case OS_CMD_PKG_REMOVE: {
+            char name[64];
+            if (copy_str_from_user(name, sizeof(name), (const char *)(uintptr_t)a1) != 0) return -1;
+            return pkg_remove(name);
+        }
+        case OS_CMD_PKG_UPDATE: {
+            return pkg_update();
+        }
+        case OS_CMD_PKG_LIST: {
+            pkg_list((bool)a1);
+            return 0;
+        }
+        case OS_CMD_PKG_SHOW: {
+            char name[64];
+            if (copy_str_from_user(name, sizeof(name), (const char *)(uintptr_t)a1) != 0) return -1;
+            pkg_show(name);
+            return 0;
+        }
+        case OS_CMD_PKG_STATUS: {
+            pkg_dpkg_list();
+            return 0;
+        }
+        case OS_CMD_PKG_INSTALL_FILE: {
+            char path[128];
+            if (copy_str_from_user(path, sizeof(path), (const char *)(uintptr_t)a1) != 0) return -1;
+            return pkg_install_deb_file(path);
+        }
+        case OS_CMD_NOVAFS_STATUS: {
+            novafs_print_stats();
+            return 0;
+        }
+        case OS_CMD_NOVAFS_FSCK: {
+            return novafs_fsck();
+        }
         default:
             return -1;
     }
+}
+
+static int32_t sys_abi_version_wrapper(uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    return (ABI_VERSION_MAJOR << 16) | (ABI_VERSION_MINOR << 8) | ABI_VERSION_PATCH;
+}
+
+static int32_t sys_getrandom_wrapper(uint64_t buf, uint64_t len, uint64_t flags, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)flags; (void)a4; (void)a5; (void)a6;
+    if (!buf || len == 0) return -EINVAL;
+    extern uint64_t aslr_rand(void);
+    uint8_t kbuf[256];
+    size_t rem = len;
+    uintptr_t cur = buf;
+    while (rem > 0) {
+        size_t chunk = rem > sizeof(kbuf) ? sizeof(kbuf) : rem;
+        for (size_t i = 0; i < chunk; i += 8) {
+            uint64_t r = aslr_rand();
+            size_t copy_bytes = (chunk - i < 8) ? (chunk - i) : 8;
+            memcpy(&kbuf[i], &r, copy_bytes);
+        }
+        if (copy_to_user((void *)cur, kbuf, chunk) != 0) return -EFAULT;
+        cur += chunk;
+        rem -= chunk;
+    }
+    return (int32_t)len;
+}
+
+static int32_t sys_socket_wrapper(uint64_t domain, uint64_t type, uint64_t protocol, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a4; (void)a5; (void)a6;
+    return socket((int)domain, (int)type, (int)protocol);
+}
+
+static int32_t sys_bind_wrapper(uint64_t fd, uint64_t addr, uint64_t len, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a4; (void)a5; (void)a6;
+    if (!addr) return -EINVAL;
+    struct sockaddr kaddr;
+    if (copy_from_user(&kaddr, (const void *)addr, sizeof(kaddr)) != 0) return -EFAULT;
+    return bind((int)fd, &kaddr, (socklen_t)len);
+}
+
+static int32_t sys_listen_wrapper(uint64_t fd, uint64_t backlog, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a3; (void)a4; (void)a5; (void)a6;
+    return listen((int)fd, (int)backlog);
+}
+
+static int32_t sys_accept_wrapper(uint64_t fd, uint64_t addr, uint64_t len, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)len; (void)a4; (void)a5; (void)a6;
+    struct sockaddr kaddr;
+    socklen_t klen = sizeof(kaddr);
+    int res = accept((int)fd, &kaddr, &klen);
+    if (res >= 0 && addr) {
+        copy_to_user((void *)addr, &kaddr, sizeof(kaddr));
+    }
+    return res;
+}
+
+static int32_t sys_connect_wrapper(uint64_t fd, uint64_t addr, uint64_t len, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a4; (void)a5; (void)a6;
+    if (!addr) return -EINVAL;
+    struct sockaddr kaddr;
+    if (copy_from_user(&kaddr, (const void *)addr, sizeof(kaddr)) != 0) return -EFAULT;
+    return connect((int)fd, &kaddr, (socklen_t)len);
+}
+
+static int32_t sys_poll_wrapper(uint64_t fds, uint64_t nfds, uint64_t timeout, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a4; (void)a5; (void)a6;
+    if (!fds && nfds > 0) return -EINVAL;
+    return poll((struct pollfd *)fds, (nfds_t)nfds, (int)timeout);
+}
+
+static int32_t sys_dlopen_wrapper(uint64_t path, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    char kpath[256];
+    if (copy_str_from_user(kpath, sizeof(kpath), (const char *)path) != 0) return -EFAULT;
+    extern void *dlopen(const char *path);
+    void *h = dlopen(kpath);
+    return (int32_t)(uintptr_t)h;
+}
+
+static int32_t sys_dlsym_wrapper(uint64_t handle, uint64_t sym, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a3; (void)a4; (void)a5; (void)a6;
+    char ksym[256];
+    if (copy_str_from_user(ksym, sizeof(ksym), (const char *)sym) != 0) return -EFAULT;
+    extern void *dlsym(void *handle, const char *symbol);
+    void *res = dlsym((void *)handle, ksym);
+    return (int32_t)(uintptr_t)res;
+}
+
+static int32_t sys_dlclose_wrapper(uint64_t handle, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
+    (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
+    extern int dlclose(void *handle);
+    return dlclose((void *)handle);
 }
 
 void syscall_init(void) {
@@ -1203,8 +1339,21 @@ void syscall_init(void) {
     syscall_table[SYS_SIGRETURN]      = sys_sigreturn_wrapper;
     syscall_table[SYS_SIGPROCMASK]    = sys_sigprocmask_wrapper;
 
-    kprintf("[SYSCALL] System call interface initialized (%d calls)\n",
-            NUM_SYSCALLS);
+    /* Professional ABI Versioning & Subsystem Extensions */
+    syscall_table[SYS_ABI_VERSION]    = sys_abi_version_wrapper;
+    syscall_table[SYS_GETRANDOM]      = sys_getrandom_wrapper;
+    syscall_table[SYS_SOCKET]         = sys_socket_wrapper;
+    syscall_table[SYS_BIND]           = sys_bind_wrapper;
+    syscall_table[SYS_LISTEN]         = sys_listen_wrapper;
+    syscall_table[SYS_ACCEPT]         = sys_accept_wrapper;
+    syscall_table[SYS_CONNECT]        = sys_connect_wrapper;
+    syscall_table[SYS_POLL]           = sys_poll_wrapper;
+    syscall_table[SYS_DLOPEN]         = sys_dlopen_wrapper;
+    syscall_table[SYS_DLSYM]          = sys_dlsym_wrapper;
+    syscall_table[SYS_DLCLOSE]        = sys_dlclose_wrapper;
+
+    kprintf("[SYSCALL] System call interface initialized (ABI v%d.%d.%d, %d calls)\n",
+            ABI_VERSION_MAJOR, ABI_VERSION_MINOR, ABI_VERSION_PATCH, NUM_SYSCALLS);
 }
 
 /* Called from syscall_entry in ASM.  Args follow the SysV convention:

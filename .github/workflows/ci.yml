@@ -1,0 +1,35 @@
+name: Kernel CI
+on: [push, pull_request]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm qemu-system-x86 mtools dosfstools gdisk
+
+      - name: Build
+        run: make all -j$(nproc)
+
+      - name: Unit Tests
+        run: make ktest
+
+      - name: Smoke Test
+        run: |
+          timeout 30 qemu-system-x86_64 \
+            -drive file=build/myos.img,format=raw,if=ide \
+            -nographic -serial stdio \
+            -m 1G -smp 4 \
+            -netdev user,id=net0 \
+            -device virtio-net-pci,netdev=net0 \
+            -vga std -display none -no-reboot \
+            | tee boot.log || true
+          grep -q "MyOS" boot.log || exit 1
+          ! grep -q "KERNEL PANIC" boot.log
+
+      - name: Fuzz Parsers
+        run: make fuzz FUZZ_TARGETS="ext2,elf,acpi" FUZZ_TIME=5

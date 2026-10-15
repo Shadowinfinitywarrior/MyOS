@@ -1,10 +1,12 @@
 #include "login.h"
+#include "glass.h"
 #include "logo.h"
 #include "theme.h"
 #include "text.h"
 #include "cursor.h"
 #include "wm.h"
 #include "../lib/string.h"
+#include "../kernel/heap.h"
 #include "../kernel/timer.h"
 #include "../kernel/storage.h"
 #include "../drivers/framebuffer.h"
@@ -320,67 +322,129 @@ static void draw_bb_round_outline(uint32_t *bb, int stride, int scr_w, int scr_h
     }
 }
 
+/* ---- cached static backdrop -----------------------------------------------
+ * The frosted tint is a full-screen alpha blend over ~786k pixels, and the
+ * card, shadow, logo and titles add more blending on top. None of that changes
+ * between frames, so the composited result is cached in login_bg and only
+ * rebuilt when the wallpaper changes. Each repaint is then one straight copy
+ * plus the small dynamic layers (input boxes, text, caret, button). */
+static uint32_t *login_bg;
+static int       login_bg_w, login_bg_h;
+static uint32_t  login_bg_sig;
+static bool      login_bg_valid;
+
+/* Sample a spread of wallpaper pixels so a theme/wallpaper change invalidates
+ * the cache without the desktop having to tell us explicitly. */
+static uint32_t login_wallpaper_sig(uint32_t *bb, int stride, int w, int h) {
+    uint32_t s = 0x811C9DC5u;
+    int mw = w > 1 ? w - 1 : 1;
+    int mh = h > 1 ? h - 1 : 1;
+    for (int i = 0; i < 64; i++) {
+        int x = (int)((uint64_t)i * (uint64_t)mw / 63);
+        int y = (int)((((uint32_t)i * 2654435761u) >> 26) * (uint32_t)mh / 63);
+        s = (s ^ bb[(size_t)y * (size_t)stride + x]) * 16777619u;
+    }
+    return s ? s : 1u;
+}
+
+/* Draw the wallpaper-independent static layers (tint, card, shadow, glint,
+ * logo, titles) onto dst. */
+static void login_draw_static(uint32_t *dst, int dstride, int w, int h) {
+    rect_t screen = { 0, 0, w, h };
+    draw_bb_round_rect(dst, dstride, w, h, &screen, 0, RGB(0x06, 0x09, 0x12), 170);
+
+    int card_w = 370, card_h = 350;
+    int card_x = (w - card_w) / 2;
+    int card_y = (h - card_h) / 2 - 20;
+    rect_t card = { card_x, card_y, card_w, card_h };
+    glass_render_panel(dst, dstride, &card);
+
+
+    int logo_cx = card_x + card_w / 2;
+    int logo_cy = card_y + 50;
+    logo_draw_buffer(dst, dstride, w, h, logo_cx, logo_cy, 58);
+
+    const char *title = "Welcome to MyOS";
+    int tw = text_width(font_bold(), title);
+    draw_bb_text(dst, dstride, font_bold(), card_x + (card_w - tw) / 2, card_y + 86,
+                 w, h, title, RGB(0xF2, 0xF8, 0xFF));
+
+    const char *sub = "GLASSMORPHIC DESKTOP • SYSTEM READY";
+    int sw = text_width(font_ui(), sub);
+    draw_bb_text(dst, dstride, font_ui(), card_x + (card_w - sw) / 2, card_y + 108,
+                 w, h, sub, RGB(0x9E, 0xC4, 0xFA));
+
+    const char *sub2 = "Sign in to access your glass session";
+    int s2w = text_width(font_ui(), sub2);
+    draw_bb_text(dst, dstride, font_ui(), card_x + (card_w - s2w) / 2, card_y + 126,
+                 w, h, sub2, RGB(0x76, 0x8E, 0xB0));
+}
+
 /* Render login screen */
 void login_render(uint32_t *bb, int stride, int scr_w, int scr_h) {
     if (!system_locked) return;
 
-    /* Frosted backdrop tint over wallpaper */
-    rect_t screen = { 0, 0, scr_w, scr_h };
-    draw_bb_round_rect(bb, stride, scr_w, scr_h, &screen, 0, RGB(0x06, 0x09, 0x12), 170);
+    /* Keep the cache matched to the current screen size. */
+    if (login_bg && (login_bg_w != scr_w || login_bg_h != scr_h)) {
+        kfree(login_bg);
+        login_bg = NULL;
+        login_bg_valid = false;
+    }
+    if (!login_bg) {
+        login_bg = (uint32_t *)kmalloc((size_t)scr_w * (size_t)scr_h * 4u);
+        if (login_bg) { login_bg_w = scr_w; login_bg_h = scr_h; login_bg_valid = false; }
+    }
 
-    /* Centered Login Card */
+    bool full = false;
+    if (login_bg) {
+        uint32_t sig = login_wallpaper_sig(bb, stride, scr_w, scr_h);
+        if (!login_bg_valid || sig != login_bg_sig) {
+            for (int y = 0; y < scr_h; y++)
+                memcpy(login_bg + (size_t)y * (size_t)scr_w,
+                       (uint8_t *)bb + (size_t)y * (size_t)stride * 4u,
+                       (size_t)scr_w * 4u);
+            login_draw_static(login_bg, scr_w, scr_w, scr_h);
+            login_bg_sig = sig;
+            login_bg_valid = true;
+            full = true;
+        }
+        for (int y = 0; y < scr_h; y++)
+            memcpy((uint8_t *)bb + (size_t)y * (size_t)stride * 4u,
+                   login_bg + (size_t)y * (size_t)scr_w,
+                   (size_t)scr_w * 4u);
+    } else {
+        /* No cache available (allocation failed): render static layers inline. */
+        login_draw_static(bb, stride, scr_w, scr_h);
+        full = true;
+    }
+
+    /* ---- dynamic layers: small, redrawn every frame ---- */
     int card_w = 370, card_h = 350;
     int card_x = (scr_w - card_w) / 2;
     int card_y = (scr_h - card_h) / 2 - 20;
-    rect_t card = { card_x, card_y, card_w, card_h };
-
-    /* Soft ambient drop shadow around login card */
-    for (int p = 14; p >= 2; p -= 2) {
-        rect_t sh = { card_x - p, card_y - p + 4, card_w + p * 2, card_h + p * 2 };
-        int a = (16 - p) * 7;
-        draw_bb_round_rect(bb, stride, scr_w, scr_h, &sh, 16 + p / 2, RGB(0, 0, 0), a);
-    }
-
-    /* Card background (dark acrylic glass) */
-    draw_bb_round_rect(bb, stride, scr_w, scr_h, &card, 16, RGB(0x13, 0x18, 0x22), 245);
-    draw_bb_round_outline(bb, stride, scr_w, scr_h, &card, 16, RGB(0x2E, 0x37, 0x47), 255);
-
-    /* Planetary Orbital 'M' Logo Badge */
-    int logo_cx = card_x + card_w / 2;
-    int logo_cy = card_y + 50;
-    logo_draw_buffer(bb, stride, scr_w, scr_h, logo_cx, logo_cy, 58);
-
-    /* Title & subtitle */
-    const char *title = "Welcome to MyOS";
-    int tw = text_width(font_bold(), title);
-    draw_bb_text(bb, stride, font_bold(), card_x + (card_w - tw) / 2, card_y + 86,
-                 scr_w, scr_h, title, RGB(0xF0, 0xF6, 0xFC));
-
-    const char *sub = "FREEDOM • PRIVACY • PERFORMANCE";
-    int sw = text_width(font_ui(), sub);
-    draw_bb_text(bb, stride, font_ui(), card_x + (card_w - sw) / 2, card_y + 108,
-                 scr_w, scr_h, sub, RGB(0x7A, 0x92, 0xB5));
-
-    const char *sub2 = "Sign in to access your desktop";
-    int s2w = text_width(font_ui(), sub2);
-    draw_bb_text(bb, stride, font_ui(), card_x + (card_w - s2w) / 2, card_y + 126,
-                 scr_w, scr_h, sub2, RGB(0x50, 0x5C, 0x6E));
 
     int inp_w = 290, inp_h = 36;
     int inp_x = card_x + (card_w - inp_w) / 2;
 
-    /* Username Input Box */
+    /* Username Input Box: frosted glass using primitives */
     int u_y = card_y + 155;
     rect_t u_box = { inp_x, u_y, inp_w, inp_h };
     bool u_focus = (focused_field == 0);
-    draw_bb_round_rect(bb, stride, scr_w, scr_h, &u_box, 8, RGB(0x0C, 0x10, 0x17), 255);
-    draw_bb_round_outline(bb, stride, scr_w, scr_h, &u_box, 8,
-                          u_focus ? RGB(0x38, 0x8B, 0xFD) : RGB(0x28, 0x30, 0x3D), 255);
+    glass_render_surface(bb, stride, &u_box, MyOSTheme.radius_input,
+                         MyOSTheme.glass_surface_primary, MyOSTheme.alpha_card,
+                         false, false, true);
+    if (u_focus) {
+        draw_bb_round_outline(bb, stride, scr_w, scr_h, &u_box, 8,
+                              MyOSTheme.accent_primary, 220);
+        rect_t u_shine = { inp_x + 6, u_y + 1, inp_w - 12, 1 };
+        draw_bb_round_rect(bb, stride, scr_w, scr_h, &u_shine, 0,
+                           MyOSTheme.highlight_shine, MyOSTheme.alpha_shine);
+    }
 
     /* Username text or placeholder */
     if (input_user[0] == '\0') {
         draw_bb_text(bb, stride, font_ui(), inp_x + 14, u_y + 10, scr_w, scr_h,
-                     "Username", RGB(0x48, 0x51, 0x5F));
+                     "Username", RGB(0x60, 0x74, 0x94));
     } else {
         draw_bb_text(bb, stride, font_ui(), inp_x + 14, u_y + 10, scr_w, scr_h,
                      input_user, RGB(0xFF, 0xFF, 0xFF));
@@ -388,21 +452,26 @@ void login_render(uint32_t *bb, int stride, int scr_w, int scr_h) {
     if (u_focus && ((timer_get_ms() / 500) % 2 == 0)) {
         int cx = inp_x + 14 + text_width(font_ui(), input_user);
         rect_t cur = { cx, u_y + 8, 2, 20 };
-        draw_bb_round_rect(bb, stride, scr_w, scr_h, &cur, 0, RGB(0x58, 0xA6, 0xFF), 255);
+        draw_bb_round_rect(bb, stride, scr_w, scr_h, &cur, 0, RGB(0x58, 0xB5, 0xFF), 255);
     }
 
-    /* Password Input Box */
+    /* Password Input Box: frosted glass using primitives */
     int p_y = u_y + 46;
     rect_t p_box = { inp_x, p_y, inp_w, inp_h };
     bool p_focus = (focused_field == 1);
-    draw_bb_round_rect(bb, stride, scr_w, scr_h, &p_box, 8, RGB(0x0C, 0x10, 0x17), 255);
-    draw_bb_round_outline(bb, stride, scr_w, scr_h, &p_box, 8,
-                          p_focus ? RGB(0x38, 0x8B, 0xFD) : RGB(0x28, 0x30, 0x3D), 255);
-
-    /* Password bullet masking (never plaintext!) */
+    glass_render_surface(bb, stride, &p_box, MyOSTheme.radius_input,
+                         MyOSTheme.glass_surface_primary, MyOSTheme.alpha_card,
+                         false, false, true);
+    if (p_focus) {
+        draw_bb_round_outline(bb, stride, scr_w, scr_h, &p_box, 8,
+                              MyOSTheme.accent_primary, 220);
+        rect_t p_shine = { inp_x + 6, p_y + 1, inp_w - 12, 1 };
+        draw_bb_round_rect(bb, stride, scr_w, scr_h, &p_shine, 0,
+                           MyOSTheme.highlight_shine, MyOSTheme.alpha_shine);
+    }
     if (input_pass[0] == '\0') {
         draw_bb_text(bb, stride, font_ui(), inp_x + 14, p_y + 10, scr_w, scr_h,
-                     "Password", RGB(0x48, 0x51, 0x5F));
+                     "Password", RGB(0x60, 0x74, 0x94));
     } else {
         /* Draw bullet dots */
         int pass_len = (int)strlen(input_pass);
@@ -416,7 +485,7 @@ void login_render(uint32_t *bb, int stride, int scr_w, int scr_h) {
     if (p_focus && ((timer_get_ms() / 500) % 2 == 0)) {
         int cx = inp_x + 14 + ((int)strlen(input_pass) * 10);
         rect_t cur = { cx, p_y + 8, 2, 20 };
-        draw_bb_round_rect(bb, stride, scr_w, scr_h, &cur, 0, RGB(0x58, 0xA6, 0xFF), 255);
+        draw_bb_round_rect(bb, stride, scr_w, scr_h, &cur, 0, RGB(0x58, 0xB5, 0xFF), 255);
     }
 
     /* Error Message display (if any) */
@@ -426,18 +495,22 @@ void login_render(uint32_t *bb, int stride, int scr_w, int scr_h) {
                      scr_w, scr_h, error_message, RGB(0xFF, 0x5F, 0x56));
     }
 
-    /* Sign In Button */
+    /* Sign In Button: electric azure glass pill using primitives */
     int btn_y = card_y + card_h - 56;
     rect_t btn = { inp_x, btn_y, inp_w, 38 };
-    color_t btn_c = button_hover ? RGB(0x2A, 0x7E, 0xF5) : RGB(0x1F, 0x6F, 0xEB);
-    draw_bb_round_rect(bb, stride, scr_w, scr_h, &btn, 9, btn_c, 255);
-    draw_bb_round_outline(bb, stride, scr_w, scr_h, &btn, 9,
-                          button_hover ? RGB(0x79, 0xB8, 0xFF) : RGB(0x38, 0x8B, 0xFD), 255);
+    glass_render_button(bb, stride, &btn, "Sign In", font_bold(), button_hover, false, RGB(0xFF, 0xFF, 0xFF));
 
-    const char *btn_text = "Sign In";
-    int bw = text_width(font_bold(), btn_text);
-    draw_bb_text(bb, stride, font_bold(), inp_x + (inp_w - bw) / 2, btn_y + 11,
-                 scr_w, scr_h, btn_text, RGB(0xFF, 0xFF, 0xFF));
+    /* Damage only what can change frame to frame: the full screen when the
+     * cached backdrop was just rebuilt, otherwise just the card interior that
+     * holds the input boxes, error text, button and caret. */
+    if (full) {
+        fb_add_damage(0, 0, scr_w, scr_h);
+    } else {
+        int dy = u_y - 8;
+        int dh = (card_y + card_h - 12) - dy;
+        if (dy < 0) { dh += dy; dy = 0; }
+        if (dh > 0) fb_add_damage(card_x, dy, card_w, dh);
+    }
 }
 
 static void try_login(void) {

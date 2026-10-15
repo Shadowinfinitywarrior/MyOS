@@ -2,6 +2,7 @@
 #define KERNEL_VTTY_H
 
 #include "../include/types.h"
+#include "../include/wait_queue.h"
 
 /* Virtual terminals.
  *
@@ -69,6 +70,9 @@ typedef struct vtty {
     char          input[VTTY_INPUT_CAP];
     int           in_head, in_tail;
 
+    /* Processes blocked in read() on this terminal, woken by vtty_push_char. */
+    wait_queue_t  read_wait;
+
     /* Bumped on every mutation so a renderer can skip untouched frames. */
     uint32_t      revision;
     /* Set when the vty is attached to a window; the WM redraws on revision. */
@@ -97,6 +101,7 @@ void      vtty_move(vtty_t *v, int x, int y);
 void      vtty_push_char(vtty_t *v, char c);
 void      vtty_push_str(vtty_t *v, const char *s);
 bool      vtty_pop_char(vtty_t *v, char *out);
+char      vtty_read_blocking(vtty_t *v);
 bool      vtty_input_empty(const vtty_t *v);
 void      vtty_flush_input(vtty_t *v);
 

@@ -23,6 +23,12 @@ typedef enum {
     TCP_TIME_WAIT = 9,
 } tcp_state_t;
 
+typedef enum {
+    TCP_SLOW_START = 0,
+    TCP_CONG_AVOID = 1,
+    TCP_FAST_RECOVERY = 2
+} tcp_congestion_state_t;
+
 typedef struct tcp_sock_internal {
     int in_use;
     uint16_t local_port;
@@ -41,6 +47,12 @@ typedef struct tcp_sock_internal {
     uint32_t iss;        // initial send sequence
     uint32_t irs;        // initial receive sequence
     uint32_t last_ack_time;
+    uint32_t rto;        // retransmission timeout (ms)
+    uint32_t srtt;       // smoothed RTT
+    uint32_t rttvar;     // RTT variance
+    uint32_t cwnd;       // congestion window
+    uint32_t ssthresh;   // slow start threshold
+    tcp_congestion_state_t cstate;
     int accept_queue_head;
     int accept_queue_tail;
     int pending_sockets[8];
@@ -48,6 +60,30 @@ typedef struct tcp_sock_internal {
 
 static tcp_sock_internal_t tcp_sockets[TCP_MAX_SOCKETS];
 static uint32_t tcp_seq_counter = 1;
+
+void tcp_on_ack(tcp_sock_internal_t *sock, uint32_t ack, uint32_t window) {
+    if (!sock) return;
+    if (ack > sock->snd_una && ack <= sock->snd_nxt) {
+        uint32_t bytes_acked = ack - sock->snd_una;
+        sock->snd_una = ack;
+        sock->snd_wnd = window;
+        sock->retransmit_count = 0;
+        if (sock->srtt == 0) sock->srtt = 200;
+        sock->rto = sock->srtt + 4 * sock->rttvar;
+        if (sock->rto < 200) sock->rto = 200;
+
+        if (sock->cstate == TCP_SLOW_START) {
+            sock->cwnd += bytes_acked;
+            if (sock->cwnd >= sock->ssthresh) {
+                sock->cstate = TCP_CONG_AVOID;
+            }
+        } else {
+            if (sock->cwnd > 0) {
+                sock->cwnd += (1460 * bytes_acked) / sock->cwnd;
+            }
+        }
+    }
+}
 
 static uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip, uint8_t *pkt, uint16_t len) {
     uint32_t sum = 0;

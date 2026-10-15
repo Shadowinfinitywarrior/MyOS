@@ -1,5 +1,6 @@
 build/devfs.o: fs/devfs.c fs/devfs.h fs/../include/system.h \
- fs/../include/types.h fs/vfs.h fs/../include/types.h fs/../kernel/heap.h \
+ fs/../include/types.h fs/vfs.h fs/../include/types.h \
+ fs/../include/spinlock.h fs/../include/system.h fs/../kernel/heap.h \
  fs/../kernel/../include/types.h fs/../kernel/timer.h fs/../lib/string.h \
  fs/../lib/../include/types.h fs/../lib/printf.h \
  fs/../drivers/framebuffer.h fs/../drivers/../include/types.h \
@@ -10,6 +11,8 @@ fs/../include/system.h:
 fs/../include/types.h:
 fs/vfs.h:
 fs/../include/types.h:
+fs/../include/spinlock.h:
+fs/../include/system.h:
 fs/../kernel/heap.h:
 fs/../kernel/../include/types.h:
 fs/../kernel/timer.h:

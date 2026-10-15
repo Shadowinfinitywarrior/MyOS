@@ -31,19 +31,16 @@ typedef struct block {
 
 static uintptr_t next_free_addr = 0;
 static block_t *free_head = NULL;
-static volatile int heap_lock = 0;
+#include "../include/spinlock.h"
 
-static inline uint8_t heap_enter(void) {
-    const uint64_t eflags = read_eflags();
-    cli();
-    while (__atomic_test_and_set((int *)&heap_lock, __ATOMIC_ACQUIRE)) {
-    }
-    return (eflags >> 9) & 1;
+static spinlock_t kernel_heap_lock = SPINLOCK_INIT;
+
+static inline uint64_t heap_enter(void) {
+    return spin_lock_irqsave(&kernel_heap_lock);
 }
 
-static inline void heap_exit(uint8_t if_bit) {
-    __atomic_clear((int *)&heap_lock, __ATOMIC_RELEASE);
-    if (if_bit) sti();
+static inline void heap_exit(uint64_t flags) {
+    spin_unlock_irqrestore(&kernel_heap_lock, flags);
 }
 
 static void heap_ensure_init(void) {
@@ -76,7 +73,7 @@ void *kmalloc(size_t size) {
     if (need < 2) need = 2;
     if (need > 0xFFFF) return NULL;
 
-    uint8_t if_bit = heap_enter();
+    uint64_t if_bit = heap_enter();
     block_t *blk = free_head;
     while (blk) {
         if (blk->magic != HEAP_MAGIC) { heap_exit(if_bit); return NULL; }
@@ -136,7 +133,7 @@ void kfree(void *ptr) {
     if ((uintptr_t)blk < HEAP_BASE || (uintptr_t)blk >= HEAP_END) {
         return;
     }
-    uint8_t if_bit = heap_enter();
+    uint64_t if_bit = heap_enter();
     if (blk->magic != HEAP_MAGIC) { heap_exit(if_bit); return; }
     if (blk->state == BLOCK_FREE) { heap_exit(if_bit); return; }
     blk->state = BLOCK_FREE;

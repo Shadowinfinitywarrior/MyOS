@@ -128,6 +128,7 @@ wm_window_t *wm_create(const char *title, int x, int y, int w, int h) {
 
 void wm_destroy(wm_window_t *w) {
     if (!w) return;
+    wm_window_damage(w);
     int idx = -1;
     for (int i = 0; i < win_count; i++) if (windows[i] == w) { idx = i; break; }
     if (idx < 0) return;
@@ -301,6 +302,7 @@ static void clamp_to_screen(wm_window_t *w) {
 }
 
 static void toggle_maximize(wm_window_t *w) {
+    wm_window_damage(w);
     if (w->flags & WF_MAXIMIZED) {
         w->frame = w->restore;
         w->flags &= ~WF_MAXIMIZED;
@@ -315,6 +317,7 @@ static void toggle_maximize(wm_window_t *w) {
     client_on_screen(w, &w->client);
     sync_surface(w);
     wm_invalidate(w);
+    wm_window_damage(w);
 }
 
 void wm_focus(wm_window_t *w) {
@@ -327,6 +330,7 @@ void wm_focus(wm_window_t *w) {
 /* ---- event dispatch ------------------------------------------------------ */
 
 static void apply_resize(wm_window_t *w, wm_edge_t e, int dx, int dy) {
+    wm_window_damage(w);
     int x = w->frame.x, y = w->frame.y, ww = w->frame.w, hh = w->frame.h;
     switch (e) {
         case EDGE_N:  y += dy; hh -= dy; break;
@@ -351,6 +355,7 @@ static void apply_resize(wm_window_t *w, wm_edge_t e, int dx, int dy) {
     client_on_screen(w, &w->client);
     sync_surface(w);
     wm_invalidate(w);
+    wm_window_damage(w);
 }
 
 bool wm_handle_event(const gui_event_t *e) {
@@ -368,6 +373,7 @@ bool wm_handle_event(const gui_event_t *e) {
                 wm_destroy(w);
                 return true;
             case HIT_MIN:
+                wm_window_damage(w);
                 w->flags |= WF_MINIMIZED;
                 wm_invalidate(w);
                 return true;
@@ -405,23 +411,30 @@ bool wm_handle_event(const gui_event_t *e) {
     }
 
     if (e->type == EV_MOUSE_MOVE) {
-        wm_window_t *w = wm_window_at_point(e->x, e->y);
-        if (w && (w->flags & WF_MINIMIZED)) w = NULL;
-        if (!w) {
-            /* Still let a dragging window follow the pointer past its edge. */
-            for (int i = 0; i < win_count; i++) {
-                if (windows[i]->flags & (WF_DRAGGING | WF_RESIZING)) {
-                    w = windows[i];
-                    break;
-                }
+        /* If any window is being dragged or resized, it retains exclusive mouse capture */
+        wm_window_t *w = NULL;
+        for (int i = 0; i < win_count; i++) {
+            if (windows[i]->flags & (WF_DRAGGING | WF_RESIZING)) {
+                w = windows[i];
+                break;
             }
-            if (!w) return false;
         }
+        if (!w) {
+            w = wm_window_at_point(e->x, e->y);
+            if (w && (w->flags & WF_MINIMIZED)) w = NULL;
+        }
+        if (!w) return false;
+
         if (w->flags & WF_DRAGGING) {
-            w->frame.x = w->orig_x + (e->x - w->grab_px);
-            w->frame.y = w->orig_y + (e->y - w->grab_py);
-            clamp_to_screen(w);
-            wm_invalidate(w);
+            int nx = w->orig_x + (e->x - w->grab_px);
+            int ny = w->orig_y + (e->y - w->grab_py);
+            if (nx != w->frame.x || ny != w->frame.y) {
+                wm_window_damage(w);
+                w->frame.x = nx;
+                w->frame.y = ny;
+                clamp_to_screen(w);
+                wm_window_damage(w);
+            }
             return true;
         }
         if (w->flags & WF_RESIZING) {
@@ -436,9 +449,10 @@ bool wm_handle_event(const gui_event_t *e) {
         for (int i = 0; i < win_count; i++) {
             wm_window_t *w = windows[i];
             if (w->flags & (WF_DRAGGING | WF_RESIZING)) {
+                wm_window_damage(w);
                 w->flags &= ~(WF_DRAGGING | WF_RESIZING);
                 w->grab_edge = EDGE_NONE;
-                wm_invalidate(w);
+                wm_window_damage(w);
                 return true;
             }
         }
@@ -471,48 +485,72 @@ static void draw_decorations(wm_window_t *w) {
     surface_t *s = w->surf;
     if (!s) return;
 
-    color_t border = w->focused ? TH_BORDER_FOCUS : TH_BORDER;
-    color_t bar    = w->focused ? TH_TITLE_FOCUS : TH_TITLE;
-    color_t text   = w->focused ? TH_TITLE_TEXT : TH_TITLE_TEXT_DIM;
+    color_t border = w->focused ? TH_ACCENT_PRIMARY : TH_GLASS_BORDER;
+    color_t text   = w->focused ? TH_TEXT_PRIMARY : TH_TEXT_SECONDARY;
 
-    /* Frame border: 1px precision modern border */
+    /* Frame border: outer frosted glass outline */
     rect_t r = { 0, 0, w->frame.w, w->frame.h };
     surface_rect_outline(s, &r, border, 1);
 
+    /* Glass specular bevel highlights on top and left inner edges */
+    rect_t inner_top = { 1, 1, w->frame.w - 2, 1 };
+    surface_fill_rect(s, &inner_top, w->focused ? RGB(0x9E, 0xC6, 0xFF) : RGB(0x52, 0x6E, 0x98));
+    rect_t inner_lft = { 1, 1, 1, w->frame.h - 2 };
+    surface_fill_rect(s, &inner_lft, w->focused ? RGB(0x72, 0x9E, 0xDB) : RGB(0x40, 0x56, 0x78));
+
     if (w->flags & WF_NO_DECOR) return;
 
-    /* Title bar: acrylic dark styling */
+    /* Title bar: frosted glass gradient with subtle ambient sheen */
     rect_t tb = { 1, 1, w->frame.w - 2, WM_TITLEBAR_H };
-    surface_fill_rect(s, &tb, bar);
+    color_t tb_top = w->focused ? RGB(0x28, 0x38, 0x58) : RGB(0x1D, 0x27, 0x3E);
+    color_t tb_bot = w->focused ? RGB(0x1B, 0x25, 0x3E) : RGB(0x15, 0x1D, 0x2E);
+    surface_gradient_v(s, &tb, tb_top, tb_bot);
 
-    /* 1px top highlight and bottom separator line */
+    /* Top specular glass glint */
     rect_t top_edge = { 1, 1, w->frame.w - 2, 1 };
-    surface_fill_rect(s, &top_edge, w->focused ? RGB(0x36, 0x3D, 0x4B) : RGB(0x28, 0x2D, 0x36));
-    rect_t bot_edge = { 1, WM_TITLEBAR_H, w->frame.w - 2, 1 };
-    surface_fill_rect(s, &bot_edge, RGB(0x1B, 0x1F, 0x27));
+    surface_fill_rect(s, &top_edge, w->focused ? RGB(0xD4, 0xE8, 0xFF) : RGB(0x7E, 0x9C, 0xC4));
 
-    /* Traffic-light buttons on the left */
+    /* 1px bottom glass separator line */
+    rect_t bot_edge = { 1, WM_TITLEBAR_H, w->frame.w - 2, 1 };
+    surface_fill_rect(s, &bot_edge, RGB(0x14, 0x1C, 0x2E));
+    rect_t bot_sub  = { 1, WM_TITLEBAR_H + 1, w->frame.w - 2, 1 };
+    surface_fill_rect(s, &bot_sub, RGB(0x22, 0x30, 0x4B));
+
+    /* Traffic-light buttons on the left (glossy glass jewels) */
     int by = tb.y + (tb.h - BTN_SIZE) / 2;
     int x_close = 1 + BTN_START_X;
     int x_min   = x_close + (BTN_SIZE + BTN_GAP);
     int x_max   = x_min + (BTN_SIZE + BTN_GAP);
 
-    /* Close (Coral Red) */
+    /* Close (Ruby Glass Jewel) */
     rect_t r_close = { x_close, by, BTN_SIZE, BTN_SIZE };
-    surface_rounded_fill(s, &r_close, 6, w->focused ? TH_BTN_CLOSE : RGB(0x48, 0x4F, 0x58));
-    surface_rounded_outline(s, &r_close, 6, w->focused ? RGB(0xE0, 0x44, 0x3E) : RGB(0x38, 0x3E, 0x47), 1);
+    surface_rounded_fill(s, &r_close, 6, w->focused ? TH_BTN_CLOSE : RGB(0x44, 0x4E, 0x60));
+    surface_rounded_outline(s, &r_close, 6, w->focused ? RGB(0xE5, 0x3C, 0x36) : RGB(0x36, 0x3F, 0x4E), 1);
+    if (w->focused) {
+        /* Upper glass glint */
+        rect_t glint = { x_close + 3, by + 2, BTN_SIZE - 6, 2 };
+        surface_fill_rect(s, &glint, RGB(0xFF, 0xAC, 0xA6));
+    }
 
-    /* Minimize (Amber) */
+    /* Minimize (Topaz Amber Glass Jewel) */
     rect_t r_min = { x_min, by, BTN_SIZE, BTN_SIZE };
-    surface_rounded_fill(s, &r_min, 6, w->focused ? TH_BTN_MIN : RGB(0x48, 0x4F, 0x58));
-    surface_rounded_outline(s, &r_min, 6, w->focused ? RGB(0xDE, 0xA1, 0x23) : RGB(0x38, 0x3E, 0x47), 1);
+    surface_rounded_fill(s, &r_min, 6, w->focused ? TH_BTN_MIN : RGB(0x44, 0x4E, 0x60));
+    surface_rounded_outline(s, &r_min, 6, w->focused ? RGB(0xDE, 0xA1, 0x23) : RGB(0x36, 0x3F, 0x4E), 1);
+    if (w->focused) {
+        rect_t glint = { x_min + 3, by + 2, BTN_SIZE - 6, 2 };
+        surface_fill_rect(s, &glint, RGB(0xFF, 0xE2, 0x8C));
+    }
 
-    /* Maximize (Emerald) */
+    /* Maximize (Emerald Glass Jewel) */
     rect_t r_max = { x_max, by, BTN_SIZE, BTN_SIZE };
-    surface_rounded_fill(s, &r_max, 6, w->focused ? TH_BTN_MAX : RGB(0x48, 0x4F, 0x58));
-    surface_rounded_outline(s, &r_max, 6, w->focused ? RGB(0x1A, 0xAB, 0x29) : RGB(0x38, 0x3E, 0x47), 1);
+    surface_rounded_fill(s, &r_max, 6, w->focused ? TH_BTN_MAX : RGB(0x44, 0x4E, 0x60));
+    surface_rounded_outline(s, &r_max, 6, w->focused ? RGB(0x1B, 0xB5, 0x2E) : RGB(0x36, 0x3F, 0x4E), 1);
+    if (w->focused) {
+        rect_t glint = { x_max + 3, by + 2, BTN_SIZE - 6, 2 };
+        surface_fill_rect(s, &glint, RGB(0x94, 0xFC, 0xA4));
+    }
 
-    /* Centered crisp title */
+    /* Centered crisp title with glass typography */
     int tw = text_width(font_bold(), w->title);
     int tx = (w->frame.w - tw) / 2;
     if (tx < x_max + BTN_SIZE + 16) tx = x_max + BTN_SIZE + 16;
@@ -541,22 +579,25 @@ void wm_compose(void) {
             int fy = w->frame.y;
             int fw = w->frame.w;
             int fh = w->frame.h;
-            int s_depth = 4;
+            int s_depth = 2;  /* reduced from 4 to halve per-pixel work */
 
             /* Right edge shadow strip */
             int rx_start = fx + fw;
-            int rx_end = rx_start + s_depth;
+            if (rx_start < 0) rx_start = 0;
+            int rx_end = fx + fw + s_depth;
             if (rx_end > screen_w) rx_end = screen_w;
-            int ry_start = (fy + 3 < 0) ? 0 : fy + 3;
+            int ry_start = fy + 1;
+            if (ry_start < 0) ry_start = 0;
             int ry_end = fy + fh + s_depth;
             if (ry_end > screen_h) ry_end = screen_h;
 
-            if (rx_start < screen_w && ry_start < ry_end) {
+            if (rx_start < rx_end && ry_start < ry_end) {
                 for (int y = ry_start; y < ry_end; y++) {
                     uint32_t *row = bb + (size_t)y * (uint32_t)stride;
                     for (int x = rx_start; x < rx_end; x++) {
-                        int dist = x - rx_start + 1;
-                        uint32_t alpha = 130 / (dist + 1);
+                        int dist = x - (fx + fw) + 1;
+                        /* Pre-computed alpha for dist 1..2: 200, 100 */
+                        uint32_t alpha = (dist == 1) ? 200 : 100;
                         uint32_t inv = 256 - alpha;
                         uint32_t c = row[x];
                         uint32_t r = (((c >> 16) & 0xFF) * inv) >> 8;
@@ -570,17 +611,20 @@ void wm_compose(void) {
 
             /* Bottom edge shadow strip */
             int by_start = fy + fh;
-            int by_end = by_start + s_depth;
+            if (by_start < 0) by_start = 0;
+            int by_end = fy + fh + s_depth;
             if (by_end > screen_h) by_end = screen_h;
-            int bx_start = (fx + 3 < 0) ? 0 : fx + 3;
+            int bx_start = fx + 1;
+            if (bx_start < 0) bx_start = 0;
             int bx_end = fx + fw;
             if (bx_end > screen_w) bx_end = screen_w;
 
-            if (by_start < screen_h && bx_start < bx_end) {
+            if (by_start < by_end && bx_start < bx_end) {
                 for (int y = by_start; y < by_end; y++) {
                     uint32_t *row = bb + (size_t)y * (uint32_t)stride;
-                    int dist = y - by_start + 1;
-                    uint32_t alpha = 130 / (dist + 1);
+                    int dist = y - (fy + fh) + 1;
+                    /* Pre-computed alpha for dist 1..2: 200, 100 */
+                    uint32_t alpha = (dist == 1) ? 200 : 100;
                     uint32_t inv = 256 - alpha;
                     for (int x = bx_start; x < bx_end; x++) {
                         uint32_t c = row[x];
@@ -654,6 +698,7 @@ void wm_alt_tab_end(void) {
 /* Snap window to screen edge (Win+Arrow) */
 void wm_snap_window(wm_window_t *w, int edge) {
     if (!w || (w->flags & (WF_MAXIMIZED | WF_MINIMIZED))) return;
+    wm_window_damage(w);
     
     int half_w = screen_w / 2;
     int half_h = screen_h / 2;
@@ -710,11 +755,13 @@ void wm_snap_window(wm_window_t *w, int edge) {
     }
     sync_surface(w);
     wm_invalidate(w);
+    wm_window_damage(w);
 }
 
 /* Toggle maximize state */
 void wm_toggle_maximize(wm_window_t *w) {
     if (!w) return;
+    wm_window_damage(w);
     if (w->flags & WF_MAXIMIZED) {
         w->frame = w->restore;
         w->flags &= ~WF_MAXIMIZED;
@@ -728,6 +775,7 @@ void wm_toggle_maximize(wm_window_t *w) {
     }
     sync_surface(w);
     wm_invalidate(w);
+    wm_window_damage(w);
 }
 
 /* Minimize all windows (Win+D) */
@@ -737,6 +785,7 @@ void wm_minimize_all(void) {
     show_desktop_prev_desktop = current_desktop;
     for (int i = 0; i < win_count; i++) {
         if (windows[i]->visible && !(windows[i]->flags & WF_MINIMIZED)) {
+            wm_window_damage(windows[i]);
             windows[i]->flags |= WF_MINIMIZED;
             wm_invalidate(windows[i]);
         }
@@ -750,6 +799,7 @@ void wm_restore_all(void) {
         if (windows[i]->flags & WF_MINIMIZED) {
             windows[i]->flags &= ~WF_MINIMIZED;
             wm_invalidate(windows[i]);
+            wm_window_damage(windows[i]);
         }
     }
     show_desktop_active = 0;
@@ -781,6 +831,7 @@ void wm_switch_desktop(int idx) {
         }
     }
     wm_invalidate_all();
+    fb_add_damage(0, 0, screen_w, screen_h);
 }
 
 int wm_current_desktop(void) {
@@ -816,6 +867,7 @@ void wm_tile_all(void) {
         }
     }
     if (count == 0) return;
+    for (int i = 0; i < count; i++) wm_window_damage(windows[vis[i]]);
     int work_h = screen_h - 40;
     if (count == 1) {
         wm_window_t *w = windows[vis[0]];
@@ -854,4 +906,5 @@ void wm_tile_all(void) {
             wm_invalidate(w);
         }
     }
+    for (int i = 0; i < count; i++) wm_window_damage(windows[vis[i]]);
 }

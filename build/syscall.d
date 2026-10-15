@@ -6,7 +6,10 @@ build/syscall.o: kernel/syscall.c kernel/syscall.h \
  kernel/../lib/string.h kernel/../drivers/screen.h \
  kernel/../drivers/../include/types.h kernel/../drivers/keyboard.h \
  kernel/../drivers/rtc.h kernel/../drivers/../include/system.h \
- kernel/../fs/vfs.h kernel/../fs/../include/types.h kernel/vtty.h \
+ kernel/../fs/vfs.h kernel/../fs/../include/types.h \
+ kernel/../fs/../include/spinlock.h kernel/../fs/../include/types.h \
+ kernel/../fs/../include/system.h kernel/vtty.h \
+ kernel/../include/wait_queue.h kernel/../include/spinlock.h \
  kernel/../include/rust_gui.h include/stdint.h \
  kernel/../include/../gui/rect.h \
  kernel/../include/../gui/../include/types.h \
@@ -18,7 +21,10 @@ build/syscall.o: kernel/syscall.c kernel/syscall.h \
  kernel/../gui/wm.h kernel/../gui/login.h kernel/../drivers/mouse.h \
  kernel/../gui/theme.h kernel/../drivers/ac97.h \
  kernel/../drivers/driver.h kernel/../drivers/../include/myosinfo.h \
- kernel/../drivers/pci.h kernel/storage.h kernel/power_net.h
+ kernel/../drivers/../include/spinlock.h kernel/../drivers/pci.h \
+ kernel/storage.h kernel/power_net.h kernel/../net/socket.h \
+ kernel/../net/../include/types.h kernel/pkg.h kernel/../fs/novafs.h \
+ kernel/../fs/vfs.h
 kernel/syscall.h:
 kernel/../include/types.h:
 kernel/../include/system.h:
@@ -41,7 +47,12 @@ kernel/../drivers/rtc.h:
 kernel/../drivers/../include/system.h:
 kernel/../fs/vfs.h:
 kernel/../fs/../include/types.h:
+kernel/../fs/../include/spinlock.h:
+kernel/../fs/../include/types.h:
+kernel/../fs/../include/system.h:
 kernel/vtty.h:
+kernel/../include/wait_queue.h:
+kernel/../include/spinlock.h:
 kernel/../include/rust_gui.h:
 include/stdint.h:
 kernel/../include/../gui/rect.h:
@@ -64,6 +75,12 @@ kernel/../gui/theme.h:
 kernel/../drivers/ac97.h:
 kernel/../drivers/driver.h:
 kernel/../drivers/../include/myosinfo.h:
+kernel/../drivers/../include/spinlock.h:
 kernel/../drivers/pci.h:
 kernel/storage.h:
 kernel/power_net.h:
+kernel/../net/socket.h:
+kernel/../net/../include/types.h:
+kernel/pkg.h:
+kernel/../fs/novafs.h:
+kernel/../fs/vfs.h:

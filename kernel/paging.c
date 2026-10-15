@@ -8,7 +8,11 @@
 #define PTE_PRESENT 0x001ULL
 #define PTE_WRITE   0x002ULL
 #define PTE_USER    0x004ULL
+#define PTE_PWT     0x008ULL
+#define PTE_PCD     0x010ULL
 #define PTE_PS      0x080ULL
+
+#define IA32_PAT_MSR 0x277ULL
 
 #define PML4_IDX(v) (((v) >> 39) & 0x1FFULL)
 #define PDPT_IDX(v) (((v) >> 30) & 0x1FFULL)
@@ -30,7 +34,34 @@ static inline void invlpg(uint64_t addr) {
     __asm__ volatile("invlpg (%0)" :: "r"(addr) : "memory");
 }
 
+static inline uint64_t paging_rdmsr(uint32_t msr) {
+    uint32_t lo, hi;
+    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+static inline void paging_wrmsr(uint32_t msr, uint64_t val) {
+    __asm__ volatile("wrmsr" : : "a"((uint32_t)val), "d"((uint32_t)(val >> 32)), "c"(msr));
+}
+
+/* Program IA32_PAT so PAT entry 1 is write-combining. Mapping a page with the
+ * PAGE_WC bit (PWT) then makes it WC instead of the reset-default WT. Leave the
+ * other entries at their firmware values so ordinary WB pages are unaffected. */
+static void paging_enable_pat(void) {
+    uint32_t a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0));
+    (void)a; (void)b; (void)c;
+    if (!(d & (1u << 16))) {
+        kprintf("[PAGING] PAT unsupported; write-combining unavailable\n");
+        return;
+    }
+    uint64_t pat = paging_rdmsr((uint32_t)IA32_PAT_MSR);
+    pat = (pat & ~0xFF00ULL) | (0x01ULL << 8); /* entry 1 = WC */
+    paging_wrmsr((uint32_t)IA32_PAT_MSR, pat);
+}
+
 void paging_init(void) {
+    paging_enable_pat();
     active_dir = &kernel_dir;
     dir_free_list = NULL;
     dir_live_list = NULL;
@@ -164,6 +195,8 @@ void paging_map(uint64_t virt, uint64_t phys, uint64_t flags) {
     uint64_t entry = (paddr & ~0xFFFULL) | PTE_PRESENT;
     if (flags & PAGE_WRITE) entry |= PTE_WRITE;
     if (flags & PAGE_USER)  entry |= PTE_USER;
+    if (flags & PAGE_WC)     entry |= PTE_PWT;
+    if (flags & PAGE_NOCACHE) entry |= PTE_PCD;
     if (flags & PAGE_NX)    entry |= (1ULL << 63);
     pt[i1] = entry;
     invlpg(vaddr);

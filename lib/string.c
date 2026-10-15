@@ -71,10 +71,20 @@ void *memset(void *s, int c, size_t n) {
 }
 
 void *memcpy(void *dest, const void *src, size_t n) {
-    unsigned char *d = dest;
-    const unsigned char *s = src;
+    void *ret = dest;
+    if (((uintptr_t)dest & 3) == 0 && ((uintptr_t)src & 3) == 0) {
+        uint32_t *d4 = (uint32_t *)dest;
+        const uint32_t *s4 = (const uint32_t *)src;
+        size_t dwords = n >> 2;
+        while (dwords--) *d4++ = *s4++;
+        dest = (void *)d4;
+        src = (const void *)s4;
+        n &= 3;
+    }
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
     while (n--) *d++ = *s++;
-    return dest;
+    return ret;
 }
 
 void *memmove(void *dest, const void *src, size_t n) {

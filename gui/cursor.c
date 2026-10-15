@@ -1,5 +1,6 @@
 #include "cursor.h"
 #include "theme.h"
+#include "../lib/string.h"
 #include "../drivers/framebuffer.h"
 
 /* Cursor bitmaps: '#' = black outline, '*' = solid white body, '.' = transparent. */
@@ -187,6 +188,7 @@ void cursor_init(void) {
     hot_y = 0;
     last_x = last_y = -1;
     under_valid = false;
+    memset(under_cursor, 0, sizeof(under_cursor));
 }
 
 void cursor_set_shape(cursor_shape_t s) { shape = s; }
@@ -278,14 +280,11 @@ void cursor_draw(void) {
 
     const char **map = shape_for(shape);
 
-    /* Smooth 2-layer ambient drop shadow with soft alpha falloff */
+    /* Draw cursor with simple solid fill and 1-layer soft shadow */
     for (int row = 0; row < CURSOR_H; row++) {
         for (int col = 0; col < CURSOR_W; col++) {
             char ch = map[row][col];
             if (ch == '#' || ch == '*' || ch == 'X' || ch == '+') {
-                /* Outer soft blur */
-                put_blend(x + col + 2, y + row + 3, RGB(0x04, 0x06, 0x0A), 50, bb, stride);
-                /* Inner soft shadow */
                 put_blend(x + col + 1, y + row + 2, RGB(0x06, 0x09, 0x0E), 110, bb, stride);
             }
         }

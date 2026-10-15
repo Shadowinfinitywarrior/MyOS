@@ -194,6 +194,14 @@ void init_phase8(void) {
     vfs_set_root(root);
     kprintf("[VFS] Root filesystem initialized with /dev\n");
 
+    /* Initialize NovaFS extent filesystem and mount at /nova */
+    extern int novafs_init(void);
+    novafs_init();
+
+    /* Initialize Debian apt/dpkg package management subsystem */
+    extern void pkg_init(void);
+    pkg_init();
+
     virtio_init();
     virtio_blk_init();
     {
@@ -339,6 +347,18 @@ void init_phase8(void) {
     ramfs_write(shutdown_node, 0, shutdown_node->length, _binary_build_user_shutdown_elf_start);
 
     kprintf("[VFS] Populated /bin with hello, forkdemo, sh, cat, echo, pwd, touch, ls, date, whoami, uname, version, ps, kill, free, uptime, calc, df, env, help, reboot, shutdown\n");
+
+    kprintf("[PHASE8] Spawning user-space 'hello' process\n");
+    process_create_user("hello",
+                        _binary_build_user_hello_elf_start,
+                        (uint64_t)(_binary_build_user_hello_elf_end -
+                                   _binary_build_user_hello_elf_start));
+
+    kprintf("[PHASE8] Spawning user 'forkdemo' process\n");
+    process_create_user("forkdemo",
+                        _binary_build_user_forkdemo_elf_start,
+                        (uint64_t)(_binary_build_user_forkdemo_elf_end -
+                                   _binary_build_user_forkdemo_elf_start));
 
     kprintf("[PHASE8] Spawning embedded init as fallback\n");
     process_create_user("init",

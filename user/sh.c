@@ -102,8 +102,20 @@ static void show_help(void) {
     puts("  storage / df               - Display persistent partitions & mounts");
     puts("  sync                       - Flush credentials and system config to disk");
     puts("  portable / usb             - Inspect portable USB/removable drives");
+    puts("  novafs [status|fsck]       - NovaFS next-gen extent filesystem controls");
     puts("  drivers                    - List active kernel hardware drivers");
     puts("  lspci                      - Scan and list all PCI hardware devices");
+    puts("");
+    puts("[ Debian Package Management (APT / DPKG) ]");
+    puts("  apt update                 - Synchronize package repository index");
+    puts("  apt install <pkg>          - Install package (.deb unpacking into /bin)");
+    puts("  apt remove <pkg>           - Remove package from system");
+    puts("  apt list [--installed]     - List all or installed packages");
+    puts("  apt show <pkg>             - Display RFC822 Debian package metadata");
+    puts("  dpkg -i <file.deb>         - Unpack and install .deb archive directly");
+    puts("  dpkg -l                    - List packages in dpkg status database");
+    puts("  dpkg -s <pkg>              - Report status of package");
+    puts("");
     puts("[ Inbuilt Applications ]");
     puts("  calc / calculator          - Launch modern arithmetic calculator");
     puts("  editor / notepad           - Launch persistent multiline text editor");
@@ -393,6 +405,76 @@ int main(void) {
             os_control(OS_CMD_PORTABLE_LIST, (long)out, sizeof(out), 0);
             puts("=== Portable & Removable Storage Devices ===");
             printf("%s", out);
+
+        /* ---- NovaFS Unified Extent Filesystem Commands ---- */
+        } else if (strcmp(argv[0], "novafs") == 0) {
+            if (argc > 1 && strcmp(argv[1], "fsck") == 0) {
+                puts("Running NovaFS consistency check and journal replay verification...");
+                long rc = os_control(OS_CMD_NOVAFS_FSCK, 0, 0, 0);
+                if (rc == 0) puts("\x1b[1;32m[NovaFS FSCK] Filesystem is clean and consistent. 0 errors.\x1b[0m");
+                else printf("\x1b[1;31m[NovaFS FSCK] Inconsistencies detected (code %ld)\x1b[0m\n", rc);
+            } else {
+                os_control(OS_CMD_NOVAFS_STATUS, 0, 0, 0);
+            }
+
+        /* ---- Debian APT Package Manager Commands ---- */
+        } else if (strcmp(argv[0], "apt") == 0 || strcmp(argv[0], "apt-get") == 0) {
+            if (argc < 2) {
+                puts("Usage: apt [update | install <pkg> | remove <pkg> | list | show <pkg>]");
+            } else if (strcmp(argv[1], "update") == 0) {
+                os_control(OS_CMD_PKG_UPDATE, 0, 0, 0);
+            } else if (strcmp(argv[1], "install") == 0) {
+                if (argc < 3) {
+                    puts("Usage: apt install <package-name>");
+                } else {
+                    os_control(OS_CMD_PKG_INSTALL, (long)argv[2], 0, 0);
+                }
+            } else if (strcmp(argv[1], "remove") == 0 || strcmp(argv[1], "purge") == 0) {
+                if (argc < 3) {
+                    puts("Usage: apt remove <package-name>");
+                } else {
+                    os_control(OS_CMD_PKG_REMOVE, (long)argv[2], 0, 0);
+                }
+            } else if (strcmp(argv[1], "list") == 0) {
+                bool installed = (argc > 2 && (strcmp(argv[2], "--installed") == 0 || strcmp(argv[2], "-i") == 0));
+                os_control(OS_CMD_PKG_LIST, (long)installed, 0, 0);
+            } else if (strcmp(argv[1], "show") == 0 || strcmp(argv[1], "info") == 0) {
+                if (argc < 3) {
+                    puts("Usage: apt show <package-name>");
+                } else {
+                    os_control(OS_CMD_PKG_SHOW, (long)argv[2], 0, 0);
+                }
+            } else {
+                printf("Unknown apt command '%s'. Available: update, install, remove, list, show\n", argv[1]);
+            }
+
+        /* ---- Debian DPKG Low-Level Package Manager ---- */
+        } else if (strcmp(argv[0], "dpkg") == 0) {
+            if (argc < 2) {
+                puts("Usage: dpkg [-i <file.deb> | -l | -s <pkg> | -r <pkg>]");
+            } else if (strcmp(argv[1], "-i") == 0 || strcmp(argv[1], "--install") == 0) {
+                if (argc < 3) {
+                    puts("Usage: dpkg -i <archive.deb>");
+                } else {
+                    os_control(OS_CMD_PKG_INSTALL_FILE, (long)argv[2], 0, 0);
+                }
+            } else if (strcmp(argv[1], "-l") == 0 || strcmp(argv[1], "--list") == 0) {
+                os_control(OS_CMD_PKG_STATUS, 0, 0, 0);
+            } else if (strcmp(argv[1], "-s") == 0 || strcmp(argv[1], "--status") == 0) {
+                if (argc < 3) {
+                    puts("Usage: dpkg -s <package-name>");
+                } else {
+                    os_control(OS_CMD_PKG_SHOW, (long)argv[2], 0, 0);
+                }
+            } else if (strcmp(argv[1], "-r") == 0 || strcmp(argv[1], "--remove") == 0) {
+                if (argc < 3) {
+                    puts("Usage: dpkg -r <package-name>");
+                } else {
+                    os_control(OS_CMD_PKG_REMOVE, (long)argv[2], 0, 0);
+                }
+            } else {
+                printf("Unknown dpkg option '%s'. Supported: -i, -l, -s, -r\n", argv[1]);
+            }
 
         /* ---- Hardware & Driver Registry ---- */
         } else if (strcmp(argv[0], "drivers") == 0 || strcmp(argv[0], "driver") == 0) {

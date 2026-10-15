@@ -4,11 +4,11 @@
 #include "../drivers/driver.h"
 
 static power_state_t sys_power = {
-    .is_charging = true,
+    .is_charging = false,
     .is_standby = false,
-    .battery_percent = 100,
-    .voltage_mv = 12600,
-    .status_str = "AC Power Online (100% Fully Charged)"
+    .battery_percent = 85,
+    .voltage_mv = 11800,
+    .status_str = "Discharging on Battery (85% Remaining)"
 };
 
 static net_state_t sys_net = {
